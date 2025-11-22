@@ -8,6 +8,7 @@ import aiohttp
 import requests
 
 from .auth import AsyncShibbolethAuth, ShibbolethAuth
+from .base import BaseAsyncClient
 from .exceptions import HandledningError, QueueError
 from .models import (
     HandledningSession,
@@ -372,7 +373,7 @@ class HandledningClient:
         self.close()
 
 
-class AsyncHandledningClient:
+class AsyncHandledningClient(BaseAsyncClient):
     """Asynchronous client for Handledning system."""
 
     def __init__(
@@ -390,33 +391,14 @@ class AsyncHandledningClient:
             mobile: Use mobile version (default: False for desktop)
             use_cache: Whether to cache authentication cookies
         """
-        self.username = username
-        self.password = password
         self.mobile = mobile
-        self.base_url = DSV_URLS["handledning_mobile" if mobile else "handledning_desktop"]
-        self.auth = AsyncShibbolethAuth(username, password, use_cache=use_cache)
-        self.session: Optional[aiohttp.ClientSession] = None
-        self._authenticated = False
-
-    async def __aenter__(self):
-        """Async context manager entry."""
-        self.session = aiohttp.ClientSession(headers=DEFAULT_HEADERS)
-        await self.auth.__aenter__()
-        return self
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Async context manager exit."""
-        if self.session:
-            await self.session.close()
-        await self.auth.__aexit__(exc_type, exc_val, exc_tb)
-
-    async def _ensure_authenticated(self) -> None:
-        """Ensure the client is authenticated."""
-        if not self._authenticated:
-            cookies = await self.auth.login("handledning")
-            for name, value in cookies.items():
-                self.session.cookie_jar.update_cookies({name: value})
-            self._authenticated = True
+        super().__init__(
+            username=username,
+            password=password,
+            base_url=DSV_URLS["handledning_mobile" if mobile else "handledning_desktop"],
+            service="handledning",
+            use_cache=use_cache,
+        )
 
     async def get_teacher_sessions(
         self, teacher_username: Optional[str] = None

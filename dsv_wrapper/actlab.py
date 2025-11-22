@@ -9,6 +9,7 @@ import aiohttp
 import requests
 
 from .auth import AsyncShibbolethAuth, ShibbolethAuth
+from .base import BaseAsyncClient
 from .exceptions import DSVWrapperError
 from .models.actlab import Show, Slide, SlideUploadResult
 from .utils import DEFAULT_HEADERS, extract_attr, extract_text, parse_html
@@ -317,7 +318,7 @@ class ACTLabClient:
         self.close()
 
 
-class AsyncACTLabClient:
+class AsyncACTLabClient(BaseAsyncClient):
     """Asynchronous client for ACT Lab digital signage system."""
 
     def __init__(
@@ -333,35 +334,14 @@ class AsyncACTLabClient:
             password: SU password
             use_cache: Whether to cache authentication cookies
         """
-        self.username = username
-        self.password = password
-        self.auth = AsyncShibbolethAuth(username, password, use_cache=use_cache)
-        self.session: Optional[aiohttp.ClientSession] = None
-        self._authenticated = False
-
+        super().__init__(
+            username=username,
+            password=password,
+            base_url=ACTLAB_BASE_URL,
+            service="unified",
+            use_cache=use_cache,
+        )
         logger.debug(f"Initialized AsyncACTLabClient for user: {username}")
-
-    async def __aenter__(self):
-        """Async context manager entry."""
-        self.session = aiohttp.ClientSession(headers=DEFAULT_HEADERS)
-        await self.auth.__aenter__()
-        return self
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Async context manager exit."""
-        if self.session:
-            await self.session.close()
-        await self.auth.__aexit__(exc_type, exc_val, exc_tb)
-
-    async def _ensure_authenticated(self) -> None:
-        """Ensure the client is authenticated."""
-        if not self._authenticated:
-            logger.info("Authenticating to ACT Lab admin")
-            cookies = await self.auth.login(service="unified")
-            for name, value in cookies.items():
-                self.session.cookie_jar.update_cookies({name: value})
-            self._authenticated = True
-            logger.info("Successfully authenticated to ACT Lab")
 
     async def get_slides(self) -> list[Slide]:
         """Get list of all available slides.

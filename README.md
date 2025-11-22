@@ -45,8 +45,8 @@ from datetime import date
 # Initialize the unified client
 with DSVClient(username="your_username", password="your_password") as client:
     # Access Daisy
-    schedule = client.daisy.get_schedule(RoomCategory.GROUPA, date.today())
-    print(f"Found {len(schedule.rooms)} rooms")
+    schedule = client.daisy.get_schedule(RoomCategory.BOOKABLE_GROUP_ROOMS, date.today())
+    print(f"Found {len(schedule.activities)} activities")
 
     # Access Handledning
     sessions = client.handledning.get_all_active_sessions()
@@ -58,32 +58,34 @@ with DSVClient(username="your_username", password="your_password") as client:
 #### Daisy Client
 
 ```python
-from dsv_wrapper import DaisyClient, RoomCategory
-from datetime import date, time
+from dsv_wrapper import DaisyClient
+from dsv_wrapper.models import RoomCategory, Room, RoomTime
+from datetime import date
 
 with DaisyClient(username="user", password="pass", service="daisy_staff") as daisy:
     # Get room schedule
-    schedule = daisy.get_schedule(RoomCategory.GROUPA, date.today())
+    schedule = daisy.get_schedule(RoomCategory.BOOKABLE_GROUP_ROOMS, date.today())
 
-    for room in schedule.rooms:
-        print(f"Room: {room.name}")
-        for slot in room.available_times:
-            if slot.available:
-                print(f"  Available: {slot.start} - {slot.end}")
+    print(f"Schedule for {schedule.room_category_title}")
+    for room_name, activities in schedule.activities.items():
+        print(f"\nRoom: {room_name}")
+        for activity in activities:
+            print(f"  {activity.time_slot_start.to_string()} - {activity.time_slot_end.to_string()}: {activity.event}")
 
-    # Book a room
-    daisy.book_room(
-        room_id="room123",
-        schedule_date=date.today(),
-        start_time=time(9, 0),
-        end_time=time(10, 0),
-        purpose="Meeting"
+    # Book a room using specific room enum and time
+    from dsv_wrapper.models import BookingSlot
+    slot = BookingSlot(
+        room=Room.G10_1,
+        from_time=RoomTime.NINE,
+        to_time=RoomTime.TEN
     )
 
     # Search for students
     students = daisy.search_students("john", limit=10)
     for student in students:
-        print(f"Student: {student.full_name} ({student.username})")
+        first_name = student.first_name or ""
+        last_name = student.last_name or ""
+        print(f"Student: {first_name} {last_name} ({student.username})")
 ```
 
 #### Handledning Client
@@ -119,15 +121,16 @@ with HandledningClient(username="user", password="pass") as handledning:
 
 ```python
 import asyncio
-from dsv_wrapper import AsyncDSVClient, RoomCategory
+from dsv_wrapper import AsyncDSVClient
+from dsv_wrapper.models import RoomCategory
 from datetime import date
 
 async def main():
     async with AsyncDSVClient(username="user", password="pass") as client:
         # Get Daisy client
         daisy = await client.get_daisy()
-        schedule = await daisy.get_schedule(RoomCategory.GROUPA, date.today())
-        print(f"Found {len(schedule.rooms)} rooms")
+        schedule = await daisy.get_schedule(RoomCategory.BOOKABLE_GROUP_ROOMS, date.today())
+        print(f"Found {len(schedule.activities)} activities")
 
         # Get Handledning client
         handledning = await client.get_handledning()
@@ -197,29 +200,40 @@ All data is represented using Pydantic models for type safety:
 
 ```python
 from dsv_wrapper.models import (
-    Room, RoomCategory, RoomTime, BookingSlot, Schedule,
+    Room, RoomCategory, RoomTime, RoomRestriction,
+    BookingSlot, RoomActivity, BookableRoom, Schedule, Break,
     Student, Teacher, Course,
     QueueEntry, QueueStatus, HandledningSession,
-    RoomActivity, ActivityType
+    ActivityType
 )
 
-# Models are immutable (frozen)
-room = Room(id="123", name="Room A", category=RoomCategory.GROUPA)
-# room.name = "New name"  # This would raise an error
+# Room enums with specific IDs
+room = Room.G10_1
+print(f"Room ID: {room.value}")  # 633
 
-# Access model properties
-print(room.name)
-print(room.category.value)
+# Room categories with numeric IDs
+category = RoomCategory.BOOKABLE_GROUP_ROOMS
+print(f"Category ID: {category.value}")  # 68
+print(f"Category string: {category.to_string()}")  # "68"
 
-# Models have validation
+# Time slots
+start = RoomTime.NINE
+end = RoomTime.TEN
+print(f"Time: {start.to_string()} - {end.to_string()}")  # "09:00 - 10:00"
+
+# Booking slots (models are immutable/frozen)
 booking = BookingSlot(
-    room_id="123",
-    room_name="Room A",
-    date=date.today(),
-    start_time=time(9, 0),
-    end_time=time(10, 0)
+    room=Room.G10_1,
+    from_time=RoomTime.NINE,
+    to_time=RoomTime.TEN
 )
-print(f"Duration: {booking.duration_hours} hours")
+# booking.room = Room.G10_2  # This would raise an error
+
+# Room restrictions for filtering
+restriction = RoomRestriction.GREEN_AREA
+filter_func = restriction.to_filter()
+rooms = [Room.G10_1, Room.G10_6, Room.G5_1]
+green_area_rooms = [r for r in rooms if filter_func(r)]
 ```
 
 ## Error Handling

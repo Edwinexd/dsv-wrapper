@@ -17,15 +17,13 @@ with DSVClient(username=USERNAME, password=PASSWORD) as client:
     daisy = client.daisy
 
     # Get room schedule
-    schedule = daisy.get_schedule(RoomCategory.GROUPA, date.today())
-    print(f"Found {len(schedule.rooms)} rooms in GROUPA")
+    schedule = daisy.get_schedule(RoomCategory.BOOKABLE_GROUP_ROOMS, date.today())
+    print(f"Schedule: {schedule.room_category_title}")
+    print(f"Found {len(schedule.activities)} rooms")
 
-    # Show available slots
-    available_count = sum(
-        len([slot for slot in room.available_times if slot.available])
-        for room in schedule.rooms
-    )
-    print(f"Total available slots: {available_count}")
+    # Show activities
+    total_activities = sum(len(activities) for activities in schedule.activities.values())
+    print(f"Total activities: {total_activities}")
 
     # Search students
     students = daisy.search_students("anna", limit=5)

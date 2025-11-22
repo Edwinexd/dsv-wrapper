@@ -3,7 +3,7 @@
 import logging
 import os
 import re
-from datetime import date, time
+from datetime import date, datetime, time
 from typing import Optional
 
 import aiohttp
@@ -11,6 +11,7 @@ import requests
 
 from .auth import AsyncShibbolethAuth, ShibbolethAuth
 from .auth.cache_backend import CacheBackend, NullCache
+from .base import BaseAsyncClient
 from .exceptions import AuthenticationError, BookingError, ParseError, RoomNotAvailableError
 
 logger = logging.getLogger(__name__)
@@ -82,7 +83,7 @@ class DaisyClient:
             schedule_date: Date to get schedule for (default: today)
 
         Returns:
-            Schedule object with rooms and available slots
+            Schedule object with activities
 
         Raises:
             ParseError: If schedule parsing fails
@@ -92,95 +93,130 @@ class DaisyClient:
         if schedule_date is None:
             schedule_date = date.today()
 
-        url = build_url(
-            self.base_url,
-            "schedule",
-            category=category.value,
-            date=schedule_date.isoformat(),
-        )
+        url = f"{self.base_url}/servlet/schema.LokalSchema"
 
-        response = self.session.get(url)
+        data = {
+            "lokalkategori": str(category.value),
+            "year": schedule_date.year,
+            "month": f"{schedule_date.month:02d}",
+            "day": f"{schedule_date.day:02d}",
+            "datumSubmit": "Visa"
+        }
+
+        response = self.session.post(url, data=data)
         response.raise_for_status()
 
-        return self._parse_schedule(response.text, category, schedule_date)
+        return self._parse_schedule(response.text)
 
-    def _parse_schedule(self, html: str, category: RoomCategory, schedule_date: date) -> Schedule:
+    def _parse_schedule(self, html: str) -> Schedule:
         """Parse schedule HTML into Schedule object.
 
+        Parses the Daisy schedule table (class='bgTabell') into a Schedule object.
+
         Args:
-            html: HTML content
-            category: Room category
-            schedule_date: Schedule date
+            html: HTML content from Daisy
 
         Returns:
-            Schedule object
+            Schedule object with activities
+
+        Raises:
+            ParseError: If parsing fails
         """
         soup = parse_html(html)
-        rooms = []
-        slots = []
 
-        # Find schedule table
-        schedule_table = soup.find("table", class_=re.compile(r"schedule|room-table"))
-
+        # Find the schedule table
+        schedule_table = soup.find("table", {"class": "bgTabell"})
         if schedule_table is None:
-            raise ParseError("Could not find schedule table")
+            raise ParseError("Could not find schedule table (class='bgTabell')")
 
-        # Parse rooms and time slots
-        for row in schedule_table.find_all("tr"):
-            room_cell = row.find("td", class_=re.compile(r"room-name|room"))
-            if room_cell is None:
+        rows = schedule_table.find_all("tr")
+        if len(rows) < 3:
+            raise ParseError("Schedule table has insufficient rows")
+
+        # Extract room names from second row (first row is headers)
+        room_names = [extract_text(td) for td in rows[1].find_all("td")[1:]]
+
+        # Parse events for each room
+        room_events = [[] for _ in room_names]
+        room_offsets = [0] * len(room_names)
+
+        for row in rows[2:]:
+            cells = row.find_all("td")
+            if not cells:
                 continue
 
-            room_name = extract_text(room_cell)
-            room_id = extract_attr(room_cell, "data-room-id", default=room_name)
+            time_slot = extract_text(cells[0])
+            slicer = 0
 
-            available_times = []
-            time_cells = row.find_all("td", class_=re.compile(r"time-slot|slot"))
+            for i in range(len(room_names)):
+                if room_offsets[i] > 0:
+                    # Continue previous event
+                    room_events[i].append((time_slot, room_events[i][-1][1]))
+                    room_offsets[i] -= 1
+                    continue
 
-            for time_cell in time_cells:
-                start_str = extract_attr(time_cell, "data-start")
-                end_str = extract_attr(time_cell, "data-end")
-                booking_url = extract_attr(time_cell, "data-booking-url")
+                if slicer + 1 >= len(cells):
+                    break
 
-                if start_str and end_str:
+                cell = cells[slicer + 1]
+                link = cell.find("a")
+                if link and (cell.get("rowspan") or extract_text(cell)):
+                    # Extract event details
+                    event_text = extract_text(list(link.children)[0] if link.children else link)
+                    duration_span = cell.find("span", {"class": "mini"})
+
+                    if duration_span:
+                        duration_text = extract_text(duration_span)
+                        if ": " in duration_text:
+                            duration = duration_text.split(": ")[1]
+                            row_span = int(cell.get("rowspan") or 1)
+                            start_hour = int(duration.split("-")[0].split(":")[0])
+                            end_hour = start_hour + row_span
+
+                            room_events[i].append((time_slot, event_text))
+                            room_offsets[i] = row_span - 1
+
+                slicer += 1
+
+        # Convert to activities dict
+        activities = {}
+        for i, room_name in enumerate(room_names):
+            activities[room_name] = []
+            for time_slot, event in room_events[i]:
+                if "-" in time_slot:
                     try:
-                        start_time = parse_time(start_str)
-                        end_time = parse_time(end_str)
-                        available = "available" in time_cell.get("class", [])
-
-                        room_time = RoomTime(
-                            start=start_time,
-                            end=end_time,
-                            available=available,
-                            booking_url=booking_url,
-                        )
-                        available_times.append(room_time)
-
-                        # Also create a BookingSlot
-                        if available:
-                            slot = BookingSlot(
-                                room_id=room_id,
-                                room_name=room_name,
-                                date=schedule_date,
-                                start_time=start_time,
-                                end_time=end_time,
-                                available=available,
-                                booking_url=booking_url,
+                        start_hour = int(time_slot.split("-")[0])
+                        end_hour = int(time_slot.split("-")[1])
+                        activities[room_name].append(
+                            RoomActivity(
+                                time_slot_start=RoomTime(start_hour),
+                                time_slot_end=RoomTime(end_hour),
+                                event=event,
                             )
-                            slots.append(slot)
-
-                    except ValueError:
+                        )
+                    except (ValueError, KeyError):
                         continue
 
-            room = Room(
-                id=room_id,
-                name=room_name,
-                category=category,
-                available_times=available_times,
-            )
-            rooms.append(room)
+        # Extract metadata
+        room_category_title = extract_text(rows[0].find_all("td")[1].find("b"))
+        category_link = rows[0].find_all("td")[1].find("a")
+        room_category_id = int(
+            category_link.get("href").split("&")[1].split("=")[1]
+        )
 
-        return Schedule(category=category, date=schedule_date, rooms=rooms, slots=slots)
+        date_column = list(rows[0].find_all("td")[1].children)[2]
+        date_match = re.findall(r"(\d{4})-(\d{2})-(\d{2})", str(date_column))[0]
+        schedule_datetime = datetime(
+            int(date_match[0]), int(date_match[1]), int(date_match[2])
+        )
+
+        return Schedule(
+            activities=activities,
+            room_category_title=room_category_title,
+            room_category_id=room_category_id,
+            room_category=RoomCategory(room_category_id),
+            datetime=schedule_datetime,
+        )
 
     def book_room(
         self,
@@ -609,7 +645,7 @@ class DaisyClient:
         self.close()
 
 
-class AsyncDaisyClient:
+class AsyncDaisyClient(BaseAsyncClient):
     """Asynchronous client for Daisy system."""
 
     def __init__(
@@ -627,33 +663,13 @@ class AsyncDaisyClient:
             service: Service type (daisy_staff or daisy_student)
             use_cache: Whether to cache authentication cookies
         """
-        self.username = username
-        self.password = password
-        self.service = service
-        self.base_url = DSV_URLS[service]
-        self.auth = AsyncShibbolethAuth(username, password, use_cache=use_cache)
-        self.session: Optional[aiohttp.ClientSession] = None
-        self._authenticated = False
-
-    async def __aenter__(self):
-        """Async context manager entry."""
-        self.session = aiohttp.ClientSession(headers=DEFAULT_HEADERS)
-        await self.auth.__aenter__()
-        return self
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Async context manager exit."""
-        if self.session:
-            await self.session.close()
-        await self.auth.__aexit__(exc_type, exc_val, exc_tb)
-
-    async def _ensure_authenticated(self) -> None:
-        """Ensure the client is authenticated."""
-        if not self._authenticated:
-            cookies = await self.auth.login(self.service)
-            for name, value in cookies.items():
-                self.session.cookie_jar.update_cookies({name: value})
-            self._authenticated = True
+        super().__init__(
+            username=username,
+            password=password,
+            base_url=DSV_URLS[service],
+            service=service,
+            use_cache=use_cache,
+        )
 
     async def get_schedule(
         self, category: RoomCategory, schedule_date: Optional[date] = None
@@ -665,7 +681,7 @@ class AsyncDaisyClient:
             schedule_date: Date to get schedule for (default: today)
 
         Returns:
-            Schedule object with rooms and available slots
+            Schedule object with activities
 
         Raises:
             ParseError: If schedule parsing fails
@@ -675,24 +691,27 @@ class AsyncDaisyClient:
         if schedule_date is None:
             schedule_date = date.today()
 
-        url = build_url(
-            self.base_url,
-            "schedule",
-            category=category.value,
-            date=schedule_date.isoformat(),
-        )
+        url = f"{self.base_url}/servlet/schema.LokalSchema"
 
-        async with self.session.get(url) as response:
+        data = {
+            "lokalkategori": str(category.value),
+            "year": schedule_date.year,
+            "month": f"{schedule_date.month:02d}",
+            "day": f"{schedule_date.day:02d}",
+            "datumSubmit": "Visa"
+        }
+
+        async with self.session.post(url, data=data) as response:
             response.raise_for_status()
             html = await response.text()
 
-        return self._parse_schedule(html, category, schedule_date)
+        return self._parse_schedule(html)
 
-    def _parse_schedule(self, html: str, category: RoomCategory, schedule_date: date) -> Schedule:
+    def _parse_schedule(self, html: str) -> Schedule:
         """Parse schedule HTML into Schedule object (same as sync version)."""
         # Use the same parsing logic as sync version
         client = DaisyClient.__new__(DaisyClient)
-        return client._parse_schedule(html, category, schedule_date)
+        return client._parse_schedule(html)
 
     async def book_room(
         self,
