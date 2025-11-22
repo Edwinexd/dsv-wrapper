@@ -16,7 +16,7 @@ A reusable Python package for accessing DSV systems (Daisy, Handledning) at Stoc
 ### From source
 
 ```bash
-git clone <repository-url>
+git clone https://github.com/Edwinexd/dsv-wrapper.git
 cd dsv-wrapper
 python3.13 -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
@@ -27,10 +27,10 @@ pip install -e .
 
 ```bash
 # Add to your requirements.txt
--e git+<repository-url>#egg=dsv-wrapper
+-e git+https://github.com/Edwinexd/dsv-wrapper.git#egg=dsv-wrapper
 
 # Or install directly
-pip install -e git+<repository-url>#egg=dsv-wrapper
+pip install -e git+https://github.com/Edwinexd/dsv-wrapper.git#egg=dsv-wrapper
 ```
 
 ## Quick Start
