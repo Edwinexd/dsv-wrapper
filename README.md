@@ -346,11 +346,31 @@ dsv-wrapper/
 
 ## License
 
-[Add your license here]
+This project is licensed under the GNU General Public License v3.0 - see the [LICENSE](LICENSE) file for details.
 
 ## Contributing
 
-[Add contribution guidelines here]
+Contributions are welcome! Please read our [Contributing Guidelines](CONTRIBUTING.md) before submitting pull requests.
+
+### Quick Start for Contributors
+
+```bash
+# Fork and clone the repository
+git clone <your-fork-url>
+cd dsv-wrapper
+
+# Set up development environment
+python3.13 -m venv venv
+source venv/bin/activate
+pip install -e ".[dev]"
+
+# Run tests
+pytest
+
+# Format code
+black dsv_wrapper/
+ruff check dsv_wrapper/
+```
 
 ## Support
 

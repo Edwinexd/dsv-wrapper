@@ -506,9 +506,15 @@ class DaisyClient:
 
         # Extract name from page
         name = ""
-        h1_tag = soup.find("h1")
-        if h1_tag:
-            name = extract_text(h1_tag)
+        # Name is in div with class="fonsterrub"
+        name_div = soup.find("div", class_="fonsterrub")
+        if name_div:
+            name = extract_text(name_div)
+        # Fallback to h1 if fonsterrub not found
+        if not name:
+            h1_tag = soup.find("h1")
+            if h1_tag:
+                name = extract_text(h1_tag)
 
         # Extract room, location, units, titles from tables
         room = None

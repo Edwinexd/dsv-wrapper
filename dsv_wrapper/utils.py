@@ -172,11 +172,15 @@ def extract_text(element, default: str = "") -> str:
         default: Default value if element is None
 
     Returns:
-        Extracted text or default
+        Extracted text or default with normalized whitespace
     """
     if element is None:
         return default
-    return element.get_text(strip=True)
+    import re
+    # Get text, strip leading/trailing whitespace, and normalize internal whitespace
+    text = element.get_text(strip=True)
+    # Replace multiple whitespace chars (including newlines) with single space
+    return re.sub(r'\s+', ' ', text)
 
 
 def extract_attr(element, attr: str, default: Optional[str] = None) -> Optional[str]:
