@@ -1,6 +1,7 @@
 """ACT Lab client for digital signage management."""
 
 import logging
+import os
 import re
 from pathlib import Path
 from typing import Optional
@@ -10,7 +11,7 @@ import requests
 
 from .auth import AsyncShibbolethAuth, ShibbolethAuth
 from .base import BaseAsyncClient
-from .exceptions import DSVWrapperError
+from .exceptions import AuthenticationError, DSVWrapperError
 from .models.actlab import Show, Slide, SlideUploadResult
 from .utils import DEFAULT_HEADERS, extract_attr, extract_text, parse_html
 
@@ -36,25 +37,36 @@ class ACTLabClient:
 
     def __init__(
         self,
-        username: str,
-        password: str,
+        username: Optional[str] = None,
+        password: Optional[str] = None,
         use_cache: bool = False,
     ):
         """Initialize ACT Lab client.
 
         Args:
-            username: SU username
-            password: SU password
+            username: SU username (default: read from SU_USERNAME env var)
+            password: SU password (default: read from SU_PASSWORD env var)
             use_cache: Whether to cache authentication cookies
+
+        Raises:
+            AuthenticationError: If username/password not provided and not in env vars
         """
-        self.username = username
-        self.password = password
-        self.auth = ShibbolethAuth(username, password, use_cache=use_cache)
+        # Get credentials from env vars if not provided
+        self.username = username or os.environ.get("SU_USERNAME")
+        self.password = password or os.environ.get("SU_PASSWORD")
+
+        if not self.username or not self.password:
+            raise AuthenticationError(
+                "Username and password must be provided either as arguments or "
+                "via SU_USERNAME and SU_PASSWORD environment variables"
+            )
+
+        self.auth = ShibbolethAuth(self.username, self.password, use_cache=use_cache)
         self.session = requests.Session()
         self.session.headers.update(DEFAULT_HEADERS)
         self._authenticated = False
 
-        logger.debug(f"Initialized ACTLabClient for user: {username}")
+        logger.debug(f"Initialized ACTLabClient for user: {self.username}")
 
     def _ensure_authenticated(self) -> None:
         """Ensure the client is authenticated."""
@@ -323,17 +335,30 @@ class AsyncACTLabClient(BaseAsyncClient):
 
     def __init__(
         self,
-        username: str,
-        password: str,
+        username: Optional[str] = None,
+        password: Optional[str] = None,
         use_cache: bool = False,
     ):
         """Initialize async ACT Lab client.
 
         Args:
-            username: SU username
-            password: SU password
+            username: SU username (default: read from SU_USERNAME env var)
+            password: SU password (default: read from SU_PASSWORD env var)
             use_cache: Whether to cache authentication cookies
+
+        Raises:
+            AuthenticationError: If username/password not provided and not in env vars
         """
+        # Get credentials from env vars if not provided
+        username = username or os.environ.get("SU_USERNAME")
+        password = password or os.environ.get("SU_PASSWORD")
+
+        if not username or not password:
+            raise AuthenticationError(
+                "Username and password must be provided either as arguments or "
+                "via SU_USERNAME and SU_PASSWORD environment variables"
+            )
+
         super().__init__(
             username=username,
             password=password,

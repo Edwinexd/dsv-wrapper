@@ -650,19 +650,32 @@ class AsyncDaisyClient(BaseAsyncClient):
 
     def __init__(
         self,
-        username: str,
-        password: str,
+        username: Optional[str] = None,
+        password: Optional[str] = None,
         service: str = "daisy_staff",
         use_cache: bool = True,
     ):
         """Initialize async Daisy client.
 
         Args:
-            username: SU username
-            password: SU password
+            username: SU username (default: read from SU_USERNAME env var)
+            password: SU password (default: read from SU_PASSWORD env var)
             service: Service type (daisy_staff or daisy_student)
             use_cache: Whether to cache authentication cookies
+
+        Raises:
+            AuthenticationError: If username/password not provided and not in env vars
         """
+        # Get credentials from env vars if not provided
+        username = username or os.environ.get("SU_USERNAME")
+        password = password or os.environ.get("SU_PASSWORD")
+
+        if not username or not password:
+            raise AuthenticationError(
+                "Username and password must be provided either as arguments or "
+                "via SU_USERNAME and SU_PASSWORD environment variables"
+            )
+
         super().__init__(
             username=username,
             password=password,

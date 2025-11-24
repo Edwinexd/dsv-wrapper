@@ -1,9 +1,11 @@
 """Unified client for all DSV systems."""
 
+import os
 from typing import Optional
 
 from .actlab import ACTLabClient, AsyncACTLabClient
 from .daisy import AsyncDaisyClient, DaisyClient
+from .exceptions import AuthenticationError
 from .handledning import AsyncHandledningClient, HandledningClient
 
 
@@ -12,21 +14,32 @@ class DSVClient:
 
     def __init__(
         self,
-        username: str,
-        password: str,
+        username: Optional[str] = None,
+        password: Optional[str] = None,
         daisy_service: str = "daisy_staff",
         use_cache: bool = True,
     ):
         """Initialize DSV unified client.
 
         Args:
-            username: SU username
-            password: SU password
+            username: SU username (default: read from SU_USERNAME env var)
+            password: SU password (default: read from SU_PASSWORD env var)
             daisy_service: Daisy service type (daisy_staff or daisy_student)
             use_cache: Whether to cache authentication cookies
+
+        Raises:
+            AuthenticationError: If username/password not provided and not in env vars
         """
-        self.username = username
-        self.password = password
+        # Get credentials from env vars if not provided
+        self.username = username or os.environ.get("SU_USERNAME")
+        self.password = password or os.environ.get("SU_PASSWORD")
+
+        if not self.username or not self.password:
+            raise AuthenticationError(
+                "Username and password must be provided either as arguments or "
+                "via SU_USERNAME and SU_PASSWORD environment variables"
+            )
+
         self.use_cache = use_cache
 
         # Initialize clients
@@ -105,21 +118,32 @@ class AsyncDSVClient:
 
     def __init__(
         self,
-        username: str,
-        password: str,
+        username: Optional[str] = None,
+        password: Optional[str] = None,
         daisy_service: str = "daisy_staff",
         use_cache: bool = True,
     ):
         """Initialize async DSV unified client.
 
         Args:
-            username: SU username
-            password: SU password
+            username: SU username (default: read from SU_USERNAME env var)
+            password: SU password (default: read from SU_PASSWORD env var)
             daisy_service: Daisy service type (daisy_staff or daisy_student)
             use_cache: Whether to cache authentication cookies
+
+        Raises:
+            AuthenticationError: If username/password not provided and not in env vars
         """
-        self.username = username
-        self.password = password
+        # Get credentials from env vars if not provided
+        self.username = username or os.environ.get("SU_USERNAME")
+        self.password = password or os.environ.get("SU_PASSWORD")
+
+        if not self.username or not self.password:
+            raise AuthenticationError(
+                "Username and password must be provided either as arguments or "
+                "via SU_USERNAME and SU_PASSWORD environment variables"
+            )
+
         self.use_cache = use_cache
 
         # Initialize clients

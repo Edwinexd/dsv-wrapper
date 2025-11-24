@@ -1,5 +1,6 @@
 """Handledning client for lab supervision queue management."""
 
+import os
 import re
 from datetime import date, datetime, time
 from typing import Optional
@@ -9,7 +10,7 @@ import requests
 
 from .auth import AsyncShibbolethAuth, ShibbolethAuth
 from .base import BaseAsyncClient
-from .exceptions import HandledningError, QueueError
+from .exceptions import AuthenticationError, HandledningError, QueueError
 from .models import (
     HandledningSession,
     QueueEntry,
@@ -33,24 +34,34 @@ class HandledningClient:
 
     def __init__(
         self,
-        username: str,
-        password: str,
+        username: Optional[str] = None,
+        password: Optional[str] = None,
         mobile: bool = False,
         use_cache: bool = True,
     ):
         """Initialize Handledning client.
 
         Args:
-            username: SU username
-            password: SU password
+            username: SU username (default: read from SU_USERNAME env var)
+            password: SU password (default: read from SU_PASSWORD env var)
             mobile: Use mobile version (default: False for desktop)
             use_cache: Whether to cache authentication cookies
+
+        Raises:
+            AuthenticationError: If username/password not provided and not in env vars
         """
-        self.username = username
-        self.password = password
+        # Get credentials from env vars if not provided
+        self.username = username or os.environ.get("SU_USERNAME")
+        self.password = password or os.environ.get("SU_PASSWORD")
+
+        if not self.username or not self.password:
+            raise AuthenticationError(
+                "Username and password must be provided either as arguments or "
+                "via SU_USERNAME and SU_PASSWORD environment variables"
+            )
         self.mobile = mobile
         self.base_url = DSV_URLS["handledning_mobile" if mobile else "handledning_desktop"]
-        self.auth = ShibbolethAuth(username, password, use_cache=use_cache)
+        self.auth = ShibbolethAuth(self.username, self.password, use_cache=use_cache)
         self.session = requests.Session()
         self.session.headers.update(DEFAULT_HEADERS)
         self._authenticated = False
@@ -378,19 +389,32 @@ class AsyncHandledningClient(BaseAsyncClient):
 
     def __init__(
         self,
-        username: str,
-        password: str,
+        username: Optional[str] = None,
+        password: Optional[str] = None,
         mobile: bool = False,
         use_cache: bool = True,
     ):
         """Initialize async Handledning client.
 
         Args:
-            username: SU username
-            password: SU password
+            username: SU username (default: read from SU_USERNAME env var)
+            password: SU password (default: read from SU_PASSWORD env var)
             mobile: Use mobile version (default: False for desktop)
             use_cache: Whether to cache authentication cookies
+
+        Raises:
+            AuthenticationError: If username/password not provided and not in env vars
         """
+        # Get credentials from env vars if not provided
+        username = username or os.environ.get("SU_USERNAME")
+        password = password or os.environ.get("SU_PASSWORD")
+
+        if not username or not password:
+            raise AuthenticationError(
+                "Username and password must be provided either as arguments or "
+                "via SU_USERNAME and SU_PASSWORD environment variables"
+            )
+
         self.mobile = mobile
         super().__init__(
             username=username,
