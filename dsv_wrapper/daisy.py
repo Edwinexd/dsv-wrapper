@@ -330,8 +330,7 @@ class DaisyClient:
                     logger.info(f"Progress: {i+1}/{len(staff_list)}")
             except Exception as e:
                 logger.error(f"Error fetching details for {staff.name}: {e}")
-                # Add basic info if details fetch fails
-                detailed_staff.append(staff)
+                raise
 
         logger.info(f"Completed: {len(detailed_staff)} staff members with details")
         return detailed_staff
@@ -665,14 +664,15 @@ class AsyncDaisyClient:
             # Create tasks for this batch
             tasks = []
             for staff in batch:
-                async def fetch_with_fallback(s: Staff) -> Staff:
+                async def fetch_details(s: Staff) -> Staff:
+                    """Fetch staff details."""
                     try:
                         return await self.get_staff_details(s.person_id)
                     except Exception as e:
-                        logger.warning(f"Failed to fetch details for {s.person_id}: {e}")
-                        return s
+                        logger.error(f"Error fetching details for {s.name}: {e}")
+                        raise
 
-                tasks.append(fetch_with_fallback(staff))
+                tasks.append(fetch_details(staff))
 
             # Execute batch concurrently
             batch_results = await asyncio.gather(*tasks)

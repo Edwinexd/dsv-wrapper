@@ -3,6 +3,7 @@
 import re
 from datetime import date, datetime
 
+from ..exceptions import ParseError
 from ..models import HandledningSession, QueueEntry, QueueStatus, Student, Teacher
 from ..utils import extract_text, parse_html, parse_time
 
@@ -51,8 +52,8 @@ def parse_teacher_sessions(html: str, default_username: str) -> list[Handledning
         try:
             start_time = parse_time(time_match.group(1))
             end_time = parse_time(time_match.group(2))
-        except ValueError:
-            continue
+        except ValueError as e:
+            raise ParseError(f"Failed to parse time from session: {e}")
 
         # Extract teacher info
         teacher_text = extract_text(teacher_elem) if teacher_elem else default_username
@@ -121,8 +122,8 @@ def parse_queue(html: str) -> list[QueueEntry]:
                 try:
                     queue_time = parse_time(time_match.group(1))
                     timestamp = datetime.combine(date.today(), queue_time)
-                except ValueError:
-                    pass
+                except ValueError as e:
+                    raise ParseError(f"Failed to parse timestamp from queue entry: {e}")
 
         # Parse status
         status = QueueStatus.WAITING

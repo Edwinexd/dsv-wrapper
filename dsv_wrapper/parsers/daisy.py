@@ -98,8 +98,8 @@ def parse_schedule(html: str) -> Schedule:
                             event=event,
                         )
                     )
-                except (ValueError, KeyError):
-                    continue
+                except (ValueError, KeyError) as e:
+                    raise ParseError(f"Failed to parse activity time slot: {e}")
 
     # Extract metadata
     room_category_title = extract_text(rows[0].find_all("td")[1].find("b"))
@@ -201,8 +201,8 @@ def parse_activities(html: str, room_id: str, schedule_date: date) -> list[RoomA
                     date=schedule_date,
                 )
                 activities.append(activity)
-            except ValueError:
-                continue
+            except ValueError as e:
+                raise ParseError(f"Failed to parse activity times: {e}")
 
     return activities
 
@@ -229,9 +229,10 @@ def parse_staff_search(html: str, base_url: str) -> list[Staff]:
             if len(cols) >= 2:
                 profile_link = row.find("a", href=lambda x: x and "personID" in x)
                 if profile_link:
-                    person_id_match = re.search(
-                        r"personID=(\d+)", profile_link.get("href", "")
-                    )
+                    href = profile_link.get("href")
+                    if not href:
+                        raise ParseError("Profile link found but missing href attribute")
+                    person_id_match = re.search(r"personID=(\d+)", href)
                     if person_id_match:
                         person_id = person_id_match.group(1)
                         name = profile_link.get_text().strip()
@@ -239,7 +240,7 @@ def parse_staff_search(html: str, base_url: str) -> list[Staff]:
                         staff = Staff(
                             person_id=person_id,
                             name=name,
-                            profile_url=f"{base_url}{profile_link.get('href')}",
+                            profile_url=f"{base_url}{href}",
                         )
                         staff_list.append(staff)
 
@@ -264,7 +265,9 @@ def parse_staff_details(person_id: str, html: str, base_url: str) -> Staff:
     profile_pic_url = None
     img_tag = soup.find("img", src=lambda x: x and "daisy.Jpg" in x)
     if img_tag:
-        pic_src = img_tag.get("src", "")
+        pic_src = img_tag.get("src")
+        if not pic_src:
+            raise ParseError("Profile image tag found but missing src attribute")
         if pic_src.startswith("/"):
             parsed = urlparse(base_url)
             profile_pic_url = f"{parsed.scheme}://{parsed.netloc}{pic_src}"
@@ -273,7 +276,10 @@ def parse_staff_details(person_id: str, html: str, base_url: str) -> Staff:
     email = None
     email_link = soup.find("a", href=lambda x: x and "mailto:" in x)
     if email_link:
-        email = email_link.get("href", "").replace("mailto:", "")
+        href = email_link.get("href")
+        if not href:
+            raise ParseError("Email link found but missing href attribute")
+        email = href.replace("mailto:", "")
 
     # Extract name from page
     name = ""
