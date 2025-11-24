@@ -9,6 +9,7 @@ import aiohttp
 import requests
 
 from .auth import AsyncShibbolethAuth, ShibbolethAuth
+from .auth.cache_backend import CacheBackend
 from .base import BaseAsyncClient
 from .exceptions import AuthenticationError, HandledningError, QueueError
 from .models import (
@@ -37,7 +38,8 @@ class HandledningClient:
         username: Optional[str] = None,
         password: Optional[str] = None,
         mobile: bool = False,
-        use_cache: bool = True,
+        cache_backend: Optional[CacheBackend] = None,
+        cache_ttl: int = 86400,
     ):
         """Initialize Handledning client.
 
@@ -45,7 +47,8 @@ class HandledningClient:
             username: SU username (default: read from SU_USERNAME env var)
             password: SU password (default: read from SU_PASSWORD env var)
             mobile: Use mobile version (default: False for desktop)
-            use_cache: Whether to cache authentication cookies
+            cache_backend: Cache backend for authentication cookies (default: NullCache)
+            cache_ttl: Cache TTL in seconds (default: 86400 = 24 hours)
 
         Raises:
             AuthenticationError: If username/password not provided and not in env vars
@@ -61,7 +64,7 @@ class HandledningClient:
             )
         self.mobile = mobile
         self.base_url = DSV_URLS["handledning_mobile" if mobile else "handledning_desktop"]
-        self.auth = ShibbolethAuth(self.username, self.password, use_cache=use_cache)
+        self.auth = ShibbolethAuth(self.username, self.password, cache_backend=cache_backend, cache_ttl=cache_ttl)
         self.session = requests.Session()
         self.session.headers.update(DEFAULT_HEADERS)
         self._authenticated = False
@@ -393,6 +396,8 @@ class AsyncHandledningClient(BaseAsyncClient):
         password: Optional[str] = None,
         mobile: bool = False,
         use_cache: bool = True,
+        cache_backend: Optional[CacheBackend] = None,
+        cache_ttl: int = 86400,
     ):
         """Initialize async Handledning client.
 
@@ -400,7 +405,9 @@ class AsyncHandledningClient(BaseAsyncClient):
             username: SU username (default: read from SU_USERNAME env var)
             password: SU password (default: read from SU_PASSWORD env var)
             mobile: Use mobile version (default: False for desktop)
-            use_cache: Whether to cache authentication cookies
+            use_cache: Whether to cache authentication cookies (default: True with MemoryCache)
+            cache_backend: Custom cache backend (overrides use_cache if provided)
+            cache_ttl: Cache TTL in seconds (default: 86400 = 24 hours)
 
         Raises:
             AuthenticationError: If username/password not provided and not in env vars
@@ -422,6 +429,8 @@ class AsyncHandledningClient(BaseAsyncClient):
             base_url=DSV_URLS["handledning_mobile" if mobile else "handledning_desktop"],
             service="handledning",
             use_cache=use_cache,
+            cache_backend=cache_backend,
+            cache_ttl=cache_ttl,
         )
 
     async def get_teacher_sessions(

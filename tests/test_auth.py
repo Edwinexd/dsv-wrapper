@@ -4,7 +4,7 @@ import logging
 
 import pytest
 
-from dsv_wrapper import CookieCache, ShibbolethAuth
+from dsv_wrapper import NullCache, ShibbolethAuth
 from dsv_wrapper.exceptions import AuthenticationError
 
 logger = logging.getLogger(__name__)
@@ -15,7 +15,7 @@ def test_shibboleth_auth_login(credentials):
     """Test basic Shibboleth authentication."""
     username, password = credentials
 
-    auth = ShibbolethAuth(username=username, password=password, use_cache=False)
+    auth = ShibbolethAuth(username=username, password=password, cache_backend=NullCache())
 
     # Login to unified service
     cookies = auth.login(service="unified")
@@ -58,7 +58,7 @@ def test_shibboleth_auth_with_cache(credentials, tmp_path):
 @pytest.mark.integration
 def test_shibboleth_auth_invalid_credentials():
     """Test authentication with invalid credentials."""
-    auth = ShibbolethAuth(username="invalid_user", password="wrong_password", use_cache=False)
+    auth = ShibbolethAuth(username="invalid_user", password="wrong_password", cache_backend=NullCache())
 
     with pytest.raises((AuthenticationError, Exception)):
         auth.login(service="unified")
@@ -71,7 +71,7 @@ def test_shibboleth_auth_daisy_staff(credentials):
     """Test authentication to Daisy staff service."""
     username, password = credentials
 
-    auth = ShibbolethAuth(username=username, password=password, use_cache=False)
+    auth = ShibbolethAuth(username=username, password=password, cache_backend=NullCache())
 
     cookies = auth.login(service="daisy_staff")
 
@@ -86,7 +86,7 @@ def test_shibboleth_auth_handledning(credentials):
     """Test authentication to Handledning service."""
     username, password = credentials
 
-    auth = ShibbolethAuth(username=username, password=password, use_cache=False)
+    auth = ShibbolethAuth(username=username, password=password, cache_backend=NullCache())
 
     cookies = auth.login(service="handledning")
 
@@ -99,8 +99,9 @@ def test_shibboleth_auth_handledning(credentials):
 def test_cookie_cache_operations(tmp_path):
     """Test cookie cache operations."""
     from requests.cookies import RequestsCookieJar
+    from dsv_wrapper import FileCache
 
-    cache = CookieCache(cache_dir=tmp_path, ttl_hours=1)
+    cache = FileCache(cache_dir=tmp_path, default_ttl=3600)
 
     # Create test cookies
     cookies = RequestsCookieJar()
@@ -114,12 +115,9 @@ def test_cookie_cache_operations(tmp_path):
     assert cached_cookies is not None
     assert "test_cookie" in cached_cookies
 
-    # Test is_valid
-    assert cache.is_valid("test_key")
-
     # Test delete
     cache.delete("test_key")
-    assert not cache.is_valid("test_key")
+    assert cache.get("test_key") is None
 
     logger.info("Cookie cache operations working correctly")
 
@@ -127,9 +125,10 @@ def test_cookie_cache_operations(tmp_path):
 def test_cookie_cache_expiry(tmp_path):
     """Test cookie cache expiry."""
     from requests.cookies import RequestsCookieJar
+    from dsv_wrapper import FileCache
 
-    # Create cache with very short TTL
-    cache = CookieCache(cache_dir=tmp_path, ttl_hours=0.0001)  # ~0.36 seconds
+    # Create cache with very short TTL (1 second)
+    cache = FileCache(cache_dir=tmp_path, default_ttl=1)
 
     cookies = RequestsCookieJar()
     cookies.set("test_cookie", "test_value")
@@ -137,14 +136,14 @@ def test_cookie_cache_expiry(tmp_path):
     cache.set("test_key", cookies)
 
     # Should be valid immediately
-    assert cache.is_valid("test_key")
+    assert cache.get("test_key") is not None
 
     # Wait for expiry
     import time
 
-    time.sleep(1)
+    time.sleep(2)  # Sleep for 2 seconds to ensure cache expired
 
     # Should be expired now
-    assert not cache.is_valid("test_key")
+    assert cache.get("test_key") is None
 
     logger.info("Cookie cache expiry working correctly")

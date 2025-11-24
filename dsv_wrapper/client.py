@@ -4,6 +4,7 @@ import os
 from typing import Optional
 
 from .actlab import ACTLabClient, AsyncACTLabClient
+from .auth.cache_backend import CacheBackend
 from .daisy import AsyncDaisyClient, DaisyClient
 from .exceptions import AuthenticationError
 from .handledning import AsyncHandledningClient, HandledningClient
@@ -17,7 +18,8 @@ class DSVClient:
         username: Optional[str] = None,
         password: Optional[str] = None,
         daisy_service: str = "daisy_staff",
-        use_cache: bool = True,
+        cache_backend: Optional[CacheBackend] = None,
+        cache_ttl: int = 86400,
     ):
         """Initialize DSV unified client.
 
@@ -25,7 +27,8 @@ class DSVClient:
             username: SU username (default: read from SU_USERNAME env var)
             password: SU password (default: read from SU_PASSWORD env var)
             daisy_service: Daisy service type (daisy_staff or daisy_student)
-            use_cache: Whether to cache authentication cookies
+            cache_backend: Cache backend for authentication cookies (default: NullCache)
+            cache_ttl: Cache TTL in seconds (default: 86400 = 24 hours)
 
         Raises:
             AuthenticationError: If username/password not provided and not in env vars
@@ -40,7 +43,8 @@ class DSVClient:
                 "via SU_USERNAME and SU_PASSWORD environment variables"
             )
 
-        self.use_cache = use_cache
+        self.cache_backend = cache_backend
+        self.cache_ttl = cache_ttl
 
         # Initialize clients
         self._daisy: Optional[DaisyClient] = None
@@ -60,7 +64,8 @@ class DSVClient:
                 username=self.username,
                 password=self.password,
                 service=self.daisy_service,
-                use_cache=self.use_cache,
+                cache_backend=self.cache_backend,
+                cache_ttl=self.cache_ttl,
             )
         return self._daisy
 
@@ -76,7 +81,8 @@ class DSVClient:
                 username=self.username,
                 password=self.password,
                 mobile=False,
-                use_cache=self.use_cache,
+                cache_backend=self.cache_backend,
+                cache_ttl=self.cache_ttl,
             )
         return self._handledning
 
@@ -91,7 +97,8 @@ class DSVClient:
             self._actlab = ACTLabClient(
                 username=self.username,
                 password=self.password,
-                use_cache=self.use_cache,
+                cache_backend=self.cache_backend,
+                cache_ttl=self.cache_ttl,
             )
         return self._actlab
 
@@ -122,6 +129,8 @@ class AsyncDSVClient:
         password: Optional[str] = None,
         daisy_service: str = "daisy_staff",
         use_cache: bool = True,
+        cache_backend: Optional[CacheBackend] = None,
+        cache_ttl: int = 86400,
     ):
         """Initialize async DSV unified client.
 
@@ -129,7 +138,9 @@ class AsyncDSVClient:
             username: SU username (default: read from SU_USERNAME env var)
             password: SU password (default: read from SU_PASSWORD env var)
             daisy_service: Daisy service type (daisy_staff or daisy_student)
-            use_cache: Whether to cache authentication cookies
+            use_cache: Whether to cache authentication cookies (default: True with MemoryCache)
+            cache_backend: Custom cache backend (overrides use_cache if provided)
+            cache_ttl: Cache TTL in seconds (default: 86400 = 24 hours)
 
         Raises:
             AuthenticationError: If username/password not provided and not in env vars
@@ -145,6 +156,8 @@ class AsyncDSVClient:
             )
 
         self.use_cache = use_cache
+        self.cache_backend = cache_backend
+        self.cache_ttl = cache_ttl
 
         # Initialize clients
         self._daisy: Optional[AsyncDaisyClient] = None
@@ -177,6 +190,8 @@ class AsyncDSVClient:
                 password=self.password,
                 service=self.daisy_service,
                 use_cache=self.use_cache,
+                cache_backend=self.cache_backend,
+                cache_ttl=self.cache_ttl,
             )
             await self._daisy.__aenter__()
         return self._daisy
@@ -193,6 +208,8 @@ class AsyncDSVClient:
                 password=self.password,
                 mobile=False,
                 use_cache=self.use_cache,
+                cache_backend=self.cache_backend,
+                cache_ttl=self.cache_ttl,
             )
             await self._handledning.__aenter__()
         return self._handledning
@@ -208,6 +225,8 @@ class AsyncDSVClient:
                 username=self.username,
                 password=self.password,
                 use_cache=self.use_cache,
+                cache_backend=self.cache_backend,
+                cache_ttl=self.cache_ttl,
             )
             await self._actlab.__aenter__()
         return self._actlab
