@@ -17,8 +17,8 @@ def test_shibboleth_auth_login(credentials):
 
     auth = ShibbolethAuth(username=username, password=password, cache_backend=NullCache())
 
-    # Login to unified service
-    cookies = auth.login(service="unified")
+    # Login to daisy staff service
+    cookies = auth._login(service="daisy_staff")
 
     assert cookies is not None
     assert len(cookies) > 0
@@ -40,15 +40,15 @@ def test_shibboleth_auth_with_cache(credentials, tmp_path):
     auth = ShibbolethAuth(username=username, password=password, cache_backend=cache)
 
     # First login (should hit the server)
-    cookies1 = auth._login(service="unified")
+    cookies1 = auth._login(service="daisy_staff")
     assert cookies1 is not None
 
     # Second login (should use cache)
-    cookies2 = auth._login(service="unified")
+    cookies2 = auth._login(service="daisy_staff")
     assert cookies2 is not None
 
     # Check cache was used
-    cache_key = f"{username}_unified"
+    cache_key = f"{username}_daisy_staff"
     assert cache.get(cache_key) is not None
 
     logger.info("Cookie caching working correctly")
@@ -62,7 +62,7 @@ def test_shibboleth_auth_invalid_credentials():
     auth = ShibbolethAuth(username="invalid_user", password="wrong_password", cache_backend=NullCache())
 
     with pytest.raises((AuthenticationError, Exception)):
-        auth.login(service="unified")
+        auth._login(service="daisy_staff")
 
     auth.__exit__(None, None, None)
 
@@ -74,7 +74,7 @@ def test_shibboleth_auth_daisy_staff(credentials):
 
     auth = ShibbolethAuth(username=username, password=password, cache_backend=NullCache())
 
-    cookies = auth.login(service="daisy_staff")
+    cookies = auth._login(service="daisy_staff")
 
     assert cookies is not None
     logger.info("Successfully authenticated to Daisy staff service")
@@ -89,7 +89,7 @@ def test_shibboleth_auth_handledning(credentials):
 
     auth = ShibbolethAuth(username=username, password=password, cache_backend=NullCache())
 
-    cookies = auth.login(service="handledning")
+    cookies = auth._login(service="handledning")
 
     assert cookies is not None
     logger.info("Successfully authenticated to Handledning service")

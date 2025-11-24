@@ -72,7 +72,7 @@ class HandledningClient:
     def _ensure_authenticated(self) -> None:
         """Ensure the client is authenticated."""
         if not self._authenticated:
-            cookies = self.auth.login("handledning")
+            cookies = self.auth._login("handledning")
             self.session.cookies.update(cookies)
             self._authenticated = True
 
@@ -395,7 +395,6 @@ class AsyncHandledningClient(BaseAsyncClient):
         username: Optional[str] = None,
         password: Optional[str] = None,
         mobile: bool = False,
-        use_cache: bool = True,
         cache_backend: Optional[CacheBackend] = None,
         cache_ttl: int = 86400,
     ):
@@ -405,8 +404,7 @@ class AsyncHandledningClient(BaseAsyncClient):
             username: SU username (default: read from SU_USERNAME env var)
             password: SU password (default: read from SU_PASSWORD env var)
             mobile: Use mobile version (default: False for desktop)
-            use_cache: Whether to cache authentication cookies (default: True with MemoryCache)
-            cache_backend: Custom cache backend (overrides use_cache if provided)
+            cache_backend: Cache backend for authentication cookies (default: NullCache)
             cache_ttl: Cache TTL in seconds (default: 86400 = 24 hours)
 
         Raises:
@@ -428,7 +426,6 @@ class AsyncHandledningClient(BaseAsyncClient):
             password=password,
             base_url=DSV_URLS["handledning_mobile" if mobile else "handledning_desktop"],
             service="handledning",
-            use_cache=use_cache,
             cache_backend=cache_backend,
             cache_ttl=cache_ttl,
         )

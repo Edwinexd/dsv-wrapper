@@ -128,7 +128,6 @@ class AsyncDSVClient:
         username: Optional[str] = None,
         password: Optional[str] = None,
         daisy_service: str = "daisy_staff",
-        use_cache: bool = True,
         cache_backend: Optional[CacheBackend] = None,
         cache_ttl: int = 86400,
     ):
@@ -138,8 +137,7 @@ class AsyncDSVClient:
             username: SU username (default: read from SU_USERNAME env var)
             password: SU password (default: read from SU_PASSWORD env var)
             daisy_service: Daisy service type (daisy_staff or daisy_student)
-            use_cache: Whether to cache authentication cookies (default: True with MemoryCache)
-            cache_backend: Custom cache backend (overrides use_cache if provided)
+            cache_backend: Cache backend for authentication cookies (default: NullCache)
             cache_ttl: Cache TTL in seconds (default: 86400 = 24 hours)
 
         Raises:
@@ -155,7 +153,6 @@ class AsyncDSVClient:
                 "via SU_USERNAME and SU_PASSWORD environment variables"
             )
 
-        self.use_cache = use_cache
         self.cache_backend = cache_backend
         self.cache_ttl = cache_ttl
 
@@ -189,7 +186,6 @@ class AsyncDSVClient:
                 username=self.username,
                 password=self.password,
                 service=self.daisy_service,
-                use_cache=self.use_cache,
                 cache_backend=self.cache_backend,
                 cache_ttl=self.cache_ttl,
             )
@@ -207,7 +203,6 @@ class AsyncDSVClient:
                 username=self.username,
                 password=self.password,
                 mobile=False,
-                use_cache=self.use_cache,
                 cache_backend=self.cache_backend,
                 cache_ttl=self.cache_ttl,
             )
@@ -224,7 +219,6 @@ class AsyncDSVClient:
             self._actlab = AsyncACTLabClient(
                 username=self.username,
                 password=self.password,
-                use_cache=self.use_cache,
                 cache_backend=self.cache_backend,
                 cache_ttl=self.cache_ttl,
             )

@@ -469,6 +469,9 @@ class DaisyClient:
         soup = parse_html(html)
         staff_list = []
 
+        # Get base_url, handling case where this is called from async client
+        base_url = getattr(self, 'base_url', DSV_URLS.get('daisy_staff', 'https://daisy.dsv.su.se'))
+
         tables = soup.find_all("table", class_="randig")
         for table in tables:
             rows = table.find_all("tr")
@@ -488,7 +491,7 @@ class DaisyClient:
                             staff = Staff(
                                 person_id=person_id,
                                 name=name,
-                                profile_url=f"{self.base_url}{profile_link.get('href')}",
+                                profile_url=f"{base_url}{profile_link.get('href')}",
                             )
                             staff_list.append(staff)
 
@@ -526,13 +529,16 @@ class DaisyClient:
         """
         soup = parse_html(html)
 
+        # Get base_url, handling case where this is called from async client
+        base_url = getattr(self, 'base_url', DSV_URLS.get('daisy_staff', 'https://daisy.dsv.su.se'))
+
         # Extract profile picture
         profile_pic_url = None
         img_tag = soup.find("img", src=lambda x: x and "daisy.Jpg" in x)
         if img_tag:
             pic_src = img_tag.get("src", "")
             if pic_src.startswith("/"):
-                profile_pic_url = f"{self.base_url.rsplit('/', 2)[0]}{pic_src}"
+                profile_pic_url = f"{base_url.rsplit('/', 2)[0]}{pic_src}"
 
         # Extract email
         email = None
@@ -588,7 +594,7 @@ class DaisyClient:
             email=email,
             room=room,
             location=location,
-            profile_url=f"{self.base_url}/anstalld/anstalldinfo.jspa?personID={person_id}",
+            profile_url=f"{base_url}/anstalld/anstalldinfo.jspa?personID={person_id}",
             profile_pic_url=profile_pic_url,
             units=units,
             swedish_title=swedish_title,
@@ -596,11 +602,21 @@ class DaisyClient:
             phone=phone,
         )
 
-    def get_all_staff(self, institution_id: str | InstitutionID = InstitutionID.DSV) -> list[Staff]:
+    def get_all_staff(
+        self,
+        institution_id: str | InstitutionID = InstitutionID.DSV,
+        batch_size: int = 10,
+        delay_between_batches: float = 0.5
+    ) -> list[Staff]:
         """Get all staff members with complete details.
+
+        Note: For sync version, batch_size and delay_between_batches are ignored.
+        They exist for API compatibility with async version.
 
         Args:
             institution_id: Institution ID (default: InstitutionID.DSV)
+            batch_size: Ignored in sync version (exists for API compatibility)
+            delay_between_batches: Ignored in sync version (exists for API compatibility)
 
         Returns:
             List of Staff objects with complete details
@@ -612,7 +628,7 @@ class DaisyClient:
         # First, search for all staff
         staff_list = self.search_staff(institution_id=institution_id)
 
-        # Then fetch details for each
+        # Then fetch details for each (sequentially)
         logger.info(f"Fetching details for {len(staff_list)} staff members...")
 
         detailed_staff = []
@@ -653,7 +669,8 @@ class AsyncDaisyClient(BaseAsyncClient):
         username: Optional[str] = None,
         password: Optional[str] = None,
         service: str = "daisy_staff",
-        use_cache: bool = True,
+        cache_backend: Optional[CacheBackend] = None,
+        cache_ttl: int = 86400,
     ):
         """Initialize async Daisy client.
 
@@ -661,7 +678,8 @@ class AsyncDaisyClient(BaseAsyncClient):
             username: SU username (default: read from SU_USERNAME env var)
             password: SU password (default: read from SU_PASSWORD env var)
             service: Service type (daisy_staff or daisy_student)
-            use_cache: Whether to cache authentication cookies
+            cache_backend: Cache backend for authentication cookies (default: NullCache)
+            cache_ttl: Cache TTL in seconds (default: 86400 = 24 hours)
 
         Raises:
             AuthenticationError: If username/password not provided and not in env vars
@@ -681,7 +699,8 @@ class AsyncDaisyClient(BaseAsyncClient):
             password=password,
             base_url=DSV_URLS[service],
             service=service,
-            use_cache=use_cache,
+            cache_backend=cache_backend,
+            cache_ttl=cache_ttl,
         )
 
     async def get_schedule(
@@ -851,3 +870,150 @@ class AsyncDaisyClient(BaseAsyncClient):
         """Parse room activities from HTML (same as sync version)."""
         client = DaisyClient.__new__(DaisyClient)
         return client._parse_activities(html, room_id, schedule_date)
+
+    async def search_staff(
+        self,
+        last_name: str = "",
+        first_name: str = "",
+        email: str = "",
+        username: str = "",
+        institution_id: str | InstitutionID = InstitutionID.DSV,
+        unit_id: str = "",
+    ) -> list[Staff]:
+        """Search for staff members in Daisy.
+
+        Args:
+            last_name: Last name to search for
+            first_name: First name to search for
+            email: Email to search for
+            username: Username to search for
+            institution_id: Institution ID (default: InstitutionID.DSV)
+            unit_id: Unit ID filter
+
+        Returns:
+            List of Staff objects with basic info
+        """
+        await self._ensure_authenticated()
+
+        logger.info(f"Searching for staff at institution {institution_id}")
+
+        form_data = {
+            "efternamn": last_name,
+            "fornamn": first_name,
+            "epost": email,
+            "anvandarnamn": username,
+            "svenskTitel": "",
+            "engelskTitel": "",
+            "personalkategori": "",
+            "institutionID": institution_id,
+            "anstalldTyp": "ALL",
+            "enhetID": unit_id,
+            "action:sokanstalld": "Sök",
+        }
+
+        url = f"{self.base_url}/sok/visaanstalld.jspa"
+        logger.debug(f"Posting to {url}")
+        logger.debug(f"Session has {len(self.session.cookie_jar)} cookies")
+
+        async with self.session.post(url, data=form_data, timeout=30) as response:
+            logger.debug(f"Response status: {response.status}")
+            logger.debug(f"Response cookies: {response.cookies}")
+            response.raise_for_status()
+            html = await response.text()
+            logger.debug(f"Response length: {len(html)} chars")
+            # Debug: save response to file
+            import os
+            if os.getenv("DEBUG_SAVE_HTML"):
+                with open("/tmp/async_staff_response.html", "w") as f:
+                    f.write(html)
+                logger.debug("Saved response to /tmp/async_staff_response.html")
+
+        result = self._parse_staff_search(html)
+        logger.debug(f"Parsed {len(result)} staff members")
+        return result
+
+    def _parse_staff_search(self, html: str) -> list[Staff]:
+        """Parse staff search results (same as sync version)."""
+        client = DaisyClient.__new__(DaisyClient)
+        return client._parse_staff_search(html)
+
+    async def get_staff_details(self, person_id: str) -> Staff:
+        """Get detailed information for a specific staff member.
+
+        Args:
+            person_id: Person ID
+
+        Returns:
+            Staff object with complete details
+        """
+        await self._ensure_authenticated()
+
+        logger.debug(f"Fetching details for staff {person_id}")
+
+        url = f"{self.base_url}/anstalld/anstalldinfo.jspa?personID={person_id}"
+
+        async with self.session.get(url, timeout=10) as response:
+            response.raise_for_status()
+            html = await response.text()
+
+        return self._parse_staff_details(person_id, html)
+
+    def _parse_staff_details(self, person_id: str, html: str) -> Staff:
+        """Parse detailed staff information from profile page (same as sync version)."""
+        client = DaisyClient.__new__(DaisyClient)
+        return client._parse_staff_details(person_id, html)
+
+    async def get_all_staff(
+        self,
+        institution_id: str | InstitutionID = InstitutionID.DSV,
+        batch_size: int = 10,
+        delay_between_batches: float = 0.5
+    ) -> list[Staff]:
+        """Get all staff members with complete details.
+
+        Args:
+            institution_id: Institution ID (default: InstitutionID.DSV)
+            batch_size: Number of concurrent requests per batch (default: 10)
+            delay_between_batches: Delay in seconds between batches (default: 0.5)
+
+        Returns:
+            List of Staff objects with complete details
+        """
+        await self._ensure_authenticated()
+
+        logger.info(f"Fetching all staff for institution {institution_id}")
+
+        # First, search for all staff
+        staff_list = await self.search_staff(institution_id=institution_id)
+
+        # Then fetch details in batches to avoid overwhelming the server
+        logger.info(f"Fetching details for {len(staff_list)} staff members in batches of {batch_size}...")
+
+        import asyncio
+
+        async def fetch_with_fallback(staff: Staff) -> Staff:
+            """Fetch details with fallback to basic info on error."""
+            try:
+                return await self.get_staff_details(staff.person_id)
+            except Exception as e:
+                logger.error(f"Error fetching details for {staff.name}: {e}")
+                return staff
+
+        detailed_staff = []
+
+        # Process in batches
+        for i in range(0, len(staff_list), batch_size):
+            batch = staff_list[i:i + batch_size]
+            logger.debug(f"Processing batch {i // batch_size + 1}/{(len(staff_list) + batch_size - 1) // batch_size}")
+
+            batch_results = await asyncio.gather(
+                *[fetch_with_fallback(staff) for staff in batch]
+            )
+            detailed_staff.extend(batch_results)
+
+            # Add delay between batches (except after the last batch)
+            if i + batch_size < len(staff_list):
+                await asyncio.sleep(delay_between_batches)
+
+        logger.info(f"Completed: {len(detailed_staff)} staff members with details")
+        return detailed_staff

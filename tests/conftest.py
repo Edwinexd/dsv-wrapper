@@ -4,6 +4,7 @@ import logging
 import os
 
 import pytest
+import pytest_asyncio
 from dotenv import load_dotenv
 
 # Configure logging for tests
@@ -60,7 +61,7 @@ def daisy_client(credentials):
     username, password = credentials
 
     client = DaisyClient(
-        username=username, password=password, service="daisy_staff", use_cache=False
+        username=username, password=password, service="daisy_staff"
     )
 
     yield client
@@ -83,7 +84,7 @@ def handledning_client(credentials):
 
     username, password = credentials
 
-    client = HandledningClient(username=username, password=password, use_cache=False)
+    client = HandledningClient(username=username, password=password)
 
     yield client
 
@@ -93,7 +94,7 @@ def handledning_client(credentials):
 
 @pytest.fixture
 def dsv_client(credentials):
-    """Create a unified DSV client for testing.
+    """Create a DSV client for testing.
 
     Args:
         credentials: Credentials fixture
@@ -105,7 +106,7 @@ def dsv_client(credentials):
 
     username, password = credentials
 
-    client = DSVClient(username=username, password=password, use_cache=False)
+    client = DSVClient(username=username, password=password)
 
     yield client
 
@@ -113,7 +114,7 @@ def dsv_client(credentials):
     client.close()
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def async_daisy_client(credentials):
     """Create an async Daisy client for testing.
 
@@ -128,14 +129,14 @@ async def async_daisy_client(credentials):
     username, password = credentials
 
     client = AsyncDaisyClient(
-        username=username, password=password, service="daisy_staff", use_cache=False
+        username=username, password=password, service="daisy_staff"
     )
 
     async with client:
         yield client
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def async_handledning_client(credentials):
     """Create an async Handledning client for testing.
 
@@ -149,7 +150,7 @@ async def async_handledning_client(credentials):
 
     username, password = credentials
 
-    client = AsyncHandledningClient(username=username, password=password, use_cache=False)
+    client = AsyncHandledningClient(username=username, password=password)
 
     async with client:
         yield client

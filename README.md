@@ -2,6 +2,12 @@
 
 A reusable Python package for accessing DSV systems (Daisy, Handledning) at Stockholm University.
 
+## ⚠️ Disclaimer
+
+**This project is an experimental initiative where all code is intended to be written by agentic AI.** The code is provided as-is for research and educational purposes. Use at your own risk.
+
+For questions or concerns regarding this project, please contact: edwinsu@dsv.su.se
+
 ## Features
 
 - **Unified Authentication**: Shibboleth SSO login with cookie caching
@@ -144,21 +150,30 @@ asyncio.run(main())
 
 ### Cookie Caching
 
-By default, authentication cookies are cached for 24 hours to avoid repeated logins:
+By default, authentication cookies are not cached. You can enable caching by providing a cache backend:
 
 ```python
-from dsv_wrapper import DSVClient, CookieCache
+from dsv_wrapper import DSVClient
+from dsv_wrapper.auth.cache_backend import MemoryCache, FileCache
 
-# Custom cache configuration
-cache = CookieCache(
-    cache_dir="/custom/cache/path",
-    ttl_hours=48,  # Cache for 48 hours
-)
+# Using memory cache (simple, but lost on restart)
+memory_cache = MemoryCache()
 
 client = DSVClient(
     username="user",
     password="pass",
-    use_cache=True  # Default
+    cache_backend=memory_cache,
+    cache_ttl=86400  # 24 hours in seconds
+)
+
+# Or use file cache for persistence
+file_cache = FileCache(cache_dir="/custom/cache/path")
+
+client = DSVClient(
+    username="user",
+    password="pass",
+    cache_backend=file_cache,
+    cache_ttl=172800  # 48 hours in seconds
 )
 ```
 
@@ -176,22 +191,20 @@ daisy_staff = DaisyClient(username="user", password="pass", service="daisy_staff
 daisy_student = DaisyClient(username="user", password="pass", service="daisy_student")
 ```
 
-### Unified SSO
+### Direct Authentication
 
-The authentication system supports the unified SSO endpoint:
+You can authenticate directly to specific services using ShibbolethAuth:
 
 ```python
 from dsv_wrapper import ShibbolethAuth
 
 auth = ShibbolethAuth(username="user", password="pass")
 
-# Login to unified SSO
-cookies = auth.login(service="unified")
-
-# Or specific services
+# Available services
 cookies = auth.login(service="daisy_staff")
 cookies = auth.login(service="daisy_student")
 cookies = auth.login(service="handledning")
+cookies = auth.login(service="actlab")
 ```
 
 ## Models

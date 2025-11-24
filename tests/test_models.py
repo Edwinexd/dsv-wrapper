@@ -27,89 +27,69 @@ logger = logging.getLogger(__name__)
 
 def test_room_category_enum():
     """Test RoomCategory enum values."""
-    assert RoomCategory.GROUPA.value == "GROUPA"
-    assert RoomCategory.GROUPB.value == "GROUPB"
-    assert RoomCategory.GROUPC.value == "GROUPC"
+    assert RoomCategory.BOOKABLE_GROUP_ROOMS.value == 68
+    assert RoomCategory.COMPUTER_LABS.value == 66
+    assert RoomCategory.TEACHING_ROOMS.value == 64
 
 
 def test_room_time_model():
-    """Test RoomTime model."""
-    room_time = RoomTime(start=time(9, 0), end=time(10, 0), available=True)
+    """Test RoomTime enum."""
+    room_time = RoomTime.NINE
 
-    assert room_time.start == time(9, 0)
-    assert room_time.end == time(10, 0)
-    assert room_time.available is True
-    assert room_time.booking_url is None
+    assert room_time.value == 9
+    assert room_time.to_string() == "09:00"
 
-    # Test frozen (immutability)
-    with pytest.raises(ValidationError):
-        room_time.start = time(11, 0)
+    # Test comparison
+    assert RoomTime.NINE < RoomTime.TEN
+    assert RoomTime.TEN > RoomTime.NINE
 
 
 def test_room_model():
-    """Test Room model."""
-    times = [
-        RoomTime(start=time(9, 0), end=time(10, 0), available=True),
-        RoomTime(start=time(10, 0), end=time(11, 0), available=False),
-    ]
+    """Test Room enum."""
+    room = Room.G10_1
 
-    room = Room(
-        id="123",
-        name="Room A",
-        category=RoomCategory.GROUPA,
-        available_times=times,
-        capacity=20,
-    )
+    assert room.value == 633
 
-    assert room.id == "123"
-    assert room.name == "Room A"
-    assert room.category == RoomCategory.GROUPA
-    assert len(room.available_times) == 2
-    assert room.capacity == 20
+    # Test from_name
+    room2 = Room.from_name("G10:1")
+    assert room2 == Room.G10_1
 
 
 def test_booking_slot_model():
     """Test BookingSlot model."""
     slot = BookingSlot(
-        room_id="123",
-        room_name="Room A",
-        date=date(2024, 1, 15),
-        start_time=time(9, 0),
-        end_time=time(10, 0),
-        available=True,
+        room=Room.G10_1,
+        from_time=RoomTime.NINE,
+        to_time=RoomTime.TEN,
     )
 
-    assert slot.room_id == "123"
-    assert slot.duration_hours == 1.0
-
-    # Test 30-minute duration
-    slot2 = BookingSlot(
-        room_id="456",
-        room_name="Room B",
-        date=date(2024, 1, 15),
-        start_time=time(9, 0),
-        end_time=time(9, 30),
-    )
-
-    assert slot2.duration_hours == 0.5
+    assert slot.room == Room.G10_1
+    assert slot.from_time == RoomTime.NINE
+    assert slot.to_time == RoomTime.TEN
 
 
 def test_schedule_model():
     """Test Schedule model."""
-    rooms = [
-        Room(id="1", name="Room 1", category=RoomCategory.GROUPA),
-        Room(id="2", name="Room 2", category=RoomCategory.GROUPA),
-    ]
+    activities = {
+        "G10:1": [
+            RoomActivity(
+                time_slot_start=RoomTime.NINE,
+                time_slot_end=RoomTime.TEN,
+                event="DA2005 - Introduction to Programming",
+            )
+        ]
+    }
 
     schedule = Schedule(
-        category=RoomCategory.GROUPA,
-        date=date.today(),
-        rooms=rooms,
+        activities=activities,
+        room_category_title="Bookable Group Rooms",
+        room_category_id=68,
+        room_category=RoomCategory.BOOKABLE_GROUP_ROOMS,
+        datetime=datetime.now(),
     )
 
-    assert schedule.category == RoomCategory.GROUPA
-    assert len(schedule.rooms) == 2
-    assert len(schedule.slots) == 0
+    assert schedule.room_category == RoomCategory.BOOKABLE_GROUP_ROOMS
+    assert len(schedule.activities) == 1
 
 
 def test_student_model():
@@ -231,18 +211,11 @@ def test_handledning_session_model():
 def test_room_activity_model():
     """Test RoomActivity model."""
     activity = RoomActivity(
-        room_name="Room 4542",
-        course_code="DA2005",
-        course_name="Introduction to Programming",
-        activity_type=ActivityType.LECTURE,
-        start_time=time(10, 0),
-        end_time=time(12, 0),
-        date=date.today(),
-        teacher="Prof. Smith",
-        students_count=25,
+        time_slot_start=RoomTime.TEN,
+        time_slot_end=RoomTime.TWELVE,
+        event="DA2005 - Introduction to Programming",
     )
 
-    assert activity.room_name == "Room 4542"
-    assert activity.course_code == "DA2005"
-    assert activity.activity_type == ActivityType.LECTURE
-    assert activity.students_count == 25
+    assert activity.time_slot_start == RoomTime.TEN
+    assert activity.time_slot_end == RoomTime.TWELVE
+    assert activity.event == "DA2005 - Introduction to Programming"

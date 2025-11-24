@@ -14,7 +14,7 @@ from .cache_backend import CacheBackend, NullCache
 
 logger = logging.getLogger(__name__)
 
-ServiceType = Literal["daisy_staff", "daisy_student", "handledning", "unified"]
+ServiceType = Literal["daisy_staff", "daisy_student", "handledning", "actlab"]
 
 
 class ShibbolethAuth:
@@ -45,11 +45,11 @@ class ShibbolethAuth:
         logger.debug(f"Initialized ShibbolethAuth for user: {username}")
         logger.debug(f"Cache backend: {type(self.cache_backend).__name__}")
 
-    def _login(self, service: ServiceType = "unified", validate_cache: bool = True) -> RequestsCookieJar:
+    def _login(self, service: ServiceType = "daisy_staff", validate_cache: bool = True) -> RequestsCookieJar:
         """Perform SSO login and get authenticated cookies (internal use only).
 
         Args:
-            service: Service to authenticate with (default: unified)
+            service: Service to authenticate with (default: daisy_staff)
             validate_cache: Whether to validate cached cookies before using (default: True)
 
         Returns:
@@ -147,8 +147,10 @@ class ShibbolethAuth:
             return "https://daisy.dsv.su.se/index.jspa"
         elif service == "handledning":
             return "https://handledning.dsv.su.se"
+        elif service == "actlab":
+            return "https://www2.dsv.su.se/act-lab/admin/"
         else:
-            return "https://unified.dsv.su.se"
+            raise ValueError(f"Unknown service type: {service}")
 
     def _perform_login(self, service: ServiceType) -> RequestsCookieJar:
         """Perform the actual SSO login flow.
@@ -340,7 +342,10 @@ class ShibbolethAuth:
 
 
 class AsyncShibbolethAuth:
-    """Asynchronous Shibboleth SSO authentication handler."""
+    """Asynchronous Shibboleth SSO authentication handler.
+
+    This wraps the synchronous ShibbolethAuth to avoid reimplementing the complex SAML flow.
+    """
 
     def __init__(
         self,
@@ -361,6 +366,9 @@ class AsyncShibbolethAuth:
         self.password = password
         self.cache_backend = cache_backend if cache_backend is not None else NullCache()
         self.cache_ttl = cache_ttl
+
+        # Use sync auth internally
+        self._sync_auth = ShibbolethAuth(username, password, cache_backend, cache_ttl)
         self.session: Optional[aiohttp.ClientSession] = None
 
         logger.debug(f"Initialized AsyncShibbolethAuth for user: {username}")
@@ -369,18 +377,20 @@ class AsyncShibbolethAuth:
     async def __aenter__(self):
         """Async context manager entry."""
         self.session = aiohttp.ClientSession(headers=DEFAULT_HEADERS)
+        self._sync_auth.__enter__()
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """Async context manager exit."""
         if self.session:
             await self.session.close()
+        self._sync_auth.__exit__(exc_type, exc_val, exc_tb)
 
-    async def login(self, service: ServiceType = "unified") -> dict:
+    async def login(self, service: ServiceType = "daisy_staff") -> dict:
         """Perform async SSO login and get authenticated cookies.
 
         Args:
-            service: Service to authenticate with (default: unified)
+            service: Service to authenticate with (default: daisy_staff)
 
         Returns:
             Authenticated cookies as dict
@@ -389,141 +399,16 @@ class AsyncShibbolethAuth:
             AuthenticationError: If authentication fails
             NetworkError: If network request fails
         """
+        import asyncio
+
         if self.session is None:
             raise RuntimeError("Session not initialized. Use 'async with' context manager.")
 
-        cache_key = f"{self.username}_{service}"
+        # Run sync login in thread pool to avoid blocking
+        cookies_jar = await asyncio.to_thread(self._sync_auth._login, service)
 
-        # Try to get cached cookies first
-        if self.use_cache:
-            cached_cookies = self.cache.get(cache_key)
-            if cached_cookies is not None:
-                return {cookie.name: cookie.value for cookie in cached_cookies}
+        # Convert RequestsCookieJar to dict
+        return {cookie.name: cookie.value for cookie in cookies_jar}
 
-        # Perform fresh login
-        try:
-            cookies = await self._perform_login(service)
-
-            # Cache the cookies (convert to RequestsCookieJar for compatibility)
-            if self.use_cache:
-                jar = RequestsCookieJar()
-                for name, value in cookies.items():
-                    jar.set(name, value)
-                self.cache.set(cache_key, jar)
-
-            return cookies
-
-        except aiohttp.ClientError as e:
-            raise NetworkError(f"Network error during authentication: {e}") from e
-
-    async def _perform_login(self, service: ServiceType) -> dict:
-        """Perform the actual async SSO login flow.
-
-        Args:
-            service: Service to authenticate with
-
-        Returns:
-            Authenticated cookies as dict
-
-        Raises:
-            AuthenticationError: If authentication fails
-        """
-        # Get the service URL
-        service_url = self._get_service_url(service)
-
-        # Step 1: Request the service URL to get redirected to Shibboleth
-        async with self.session.get(service_url, allow_redirects=True) as response:
-            html = await response.text()
-
-        # Step 2: Parse the login form
-        soup = parse_html(html)
-        login_form = soup.find("form", {"id": "login"})
-
-        if login_form is None:
-            # Already authenticated or no login required
-            return {cookie.key: cookie.value for cookie in self.session.cookie_jar}
-
-        form_action = extract_attr(login_form, "action")
-        if form_action is None:
-            raise AuthenticationError("Could not find login form action")
-
-        # Step 3: Submit credentials
-        login_data = {
-            "j_username": self.username,
-            "j_password": self.password,
-            "_eventId_proceed": "",
-        }
-
-        async with self.session.post(
-            form_action, data=login_data, allow_redirects=False
-        ) as response:
-            if response.status in (301, 302, 303):
-                redirect_url = response.headers["Location"]
-                async with self.session.get(redirect_url, allow_redirects=True) as resp:
-                    html = await resp.text()
-            else:
-                html = await response.text()
-                # Check if login failed
-                soup = parse_html(html)
-                error = soup.find("p", class_="form-error")
-                if error:
-                    raise AuthenticationError(f"Login failed: {error.get_text(strip=True)}")
-
-        # Step 4: Handle SAML response auto-submit form
-        soup = parse_html(html)
-        saml_form = soup.find("form", method="post")
-
-        if saml_form:
-            saml_action = extract_attr(saml_form, "action")
-            saml_data = {}
-
-            for input_field in saml_form.find_all("input"):
-                name = extract_attr(input_field, "name")
-                value = extract_attr(input_field, "value")
-                if name:
-                    saml_data[name] = value or ""
-
-            async with self.session.post(
-                saml_action, data=saml_data, allow_redirects=True
-            ) as response:
-                html = await response.text()
-
-        # Verify we're authenticated
-        if not self._is_authenticated(html):
-            raise AuthenticationError("Authentication failed: Could not verify login")
-
-        return {cookie.key: cookie.value for cookie in self.session.cookie_jar}
-
-    def _get_service_url(self, service: ServiceType) -> str:
-        """Get the SSO target URL for a given service type.
-
-        Args:
-            service: Service type
-
-        Returns:
-            SSO target URL
-        """
-        if service in DSV_SSO_TARGETS:
-            return DSV_SSO_TARGETS[service]
-        else:
-            raise ValueError(f"Unknown service type: {service}")
-
-    def _is_authenticated(self, html: str) -> bool:
-        """Check if we're authenticated by looking for indicators in HTML.
-
-        Args:
-            html: HTML response
-
-        Returns:
-            True if authenticated
-        """
-        indicators = [
-            "logout",
-            "logga ut",
-            self.username.lower(),
-            "profile",
-            "profil",
-        ]
-
-        html_lower = html.lower()
-        return any(indicator in html_lower for indicator in indicators)
+    # Note: We don't need async implementations of _perform_login, _get_service_url, or _is_authenticated
+    # since we're wrapping the sync version using asyncio.to_thread().

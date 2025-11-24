@@ -8,7 +8,7 @@ from dsv_wrapper import ACTLabClient
 USERNAME = "your_username"
 PASSWORD = "your_password"
 
-with ACTLabClient(username=USERNAME, password=PASSWORD, use_cache=False) as actlab:
+with ACTLabClient(username=USERNAME, password=PASSWORD) as actlab:
     print("=== ACT Lab Client Example ===\n")
 
     # Get list of all slides

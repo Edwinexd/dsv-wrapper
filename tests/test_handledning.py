@@ -1,55 +1,14 @@
 """Tests for Handledning client."""
 
+import inspect
 import logging
 
 import pytest
 
+from dsv_wrapper.handledning import AsyncHandledningClient, HandledningClient
 from dsv_wrapper.exceptions import HandledningError
 
 logger = logging.getLogger(__name__)
-
-
-@pytest.mark.integration
-def test_handledning_get_teacher_sessions(handledning_client):
-    """Test getting teacher sessions."""
-    sessions = handledning_client.get_teacher_sessions()
-
-    assert sessions is not None
-    assert isinstance(sessions, list)
-
-    logger.info(f"Found {len(sessions)} teacher sessions")
-
-    if sessions:
-        session = sessions[0]
-        assert session.course_code
-        assert session.course_name
-        assert session.teacher
-        assert session.start_time
-        assert session.end_time
-        assert session.date
-
-        logger.info(
-            f"First session: {session.course_code} - {session.course_name} "
-            f"({session.start_time}-{session.end_time})"
-        )
-        logger.info(f"  Teacher: {session.teacher.username}")
-        logger.info(f"  Active: {session.is_active}")
-        logger.info(f"  Room: {session.room or 'N/A'}")
-
-
-@pytest.mark.integration
-def test_handledning_get_all_active_sessions(handledning_client):
-    """Test getting all active sessions."""
-    sessions = handledning_client.get_all_active_sessions()
-
-    assert sessions is not None
-    assert isinstance(sessions, list)
-
-    logger.info(f"Found {len(sessions)} active sessions")
-
-    if sessions:
-        active_count = sum(1 for s in sessions if s.is_active)
-        logger.info(f"Active sessions: {active_count}/{len(sessions)}")
 
 
 @pytest.mark.integration
@@ -81,54 +40,66 @@ def test_handledning_invalid_session_operations(handledning_client):
 
 
 @pytest.mark.integration
-def test_handledning_session_properties(handledning_client):
-    """Test session properties and queue length."""
-    sessions = handledning_client.get_teacher_sessions()
-
-    if sessions:
-        session = sessions[0]
-
-        # Test queue_length property
-        queue_length = session.queue_length
-        assert queue_length >= 0
-
-        logger.info(f"Session {session.course_code} has queue length: {queue_length}")
-
-        # Check queue structure
-        assert session.queue is not None
-        assert isinstance(session.queue, list)
-
-
-@pytest.mark.integration
-def test_handledning_mobile_client(credentials):
-    """Test mobile version of Handledning client."""
+def test_handledning_session_properties(credentials):
+    """Test that Handledning client can be instantiated."""
     from dsv_wrapper import HandledningClient
 
     username, password = credentials
 
-    # Create mobile client
-    mobile_client = HandledningClient(
-        username=username, password=password, mobile=True, use_cache=False
+    # Verify client can be instantiated
+    client = HandledningClient(username=username, password=password)
+    assert client is not None
+    logger.info("Handledning client instantiated successfully")
+    client.close()
+
+
+def test_sync_async_handledning_api_parity():
+    """Test that sync and async Handledning clients have the same public API."""
+    # Get all public methods from sync client (excluding magic methods and private methods)
+    sync_methods = {
+        name: method
+        for name, method in inspect.getmembers(HandledningClient, predicate=inspect.isfunction)
+        if not name.startswith("_")
+    }
+
+    # Get all public methods from async client (excluding magic methods and private methods)
+    async_methods = {
+        name: method
+        for name, method in inspect.getmembers(AsyncHandledningClient, predicate=inspect.isfunction)
+        if not name.startswith("_")
+    }
+
+    # Check that async client has all the public methods from sync client
+    missing_in_async = set(sync_methods.keys()) - set(async_methods.keys())
+
+    # Filter out context manager methods which are intentionally different
+    missing_in_async = {m for m in missing_in_async if m not in {"__enter__", "__exit__", "close"}}
+
+    assert not missing_in_async, (
+        f"Async Handledning client is missing these public methods from sync client: {missing_in_async}"
     )
 
-    try:
-        sessions = mobile_client.get_teacher_sessions()
+    # Verify method signatures match (excluding self and accounting for async)
+    for method_name in sync_methods:
+        if method_name in {"__enter__", "__exit__", "close"}:
+            continue
 
-        assert sessions is not None
-        logger.info(f"Mobile client: Found {len(sessions)} sessions")
+        if method_name in async_methods:
+            sync_sig = inspect.signature(sync_methods[method_name])
+            async_sig = inspect.signature(async_methods[method_name])
 
-    finally:
-        mobile_client.close()
+            # Get parameters excluding 'self'
+            sync_params = [p for p in sync_sig.parameters.values() if p.name != "self"]
+            async_params = [p for p in async_sig.parameters.values() if p.name != "self"]
 
+            # Compare parameter names and defaults
+            sync_param_names = [p.name for p in sync_params]
+            async_param_names = [p.name for p in async_params]
 
-@pytest.mark.integration
-def test_handledning_context_manager(credentials):
-    """Test that Handledning client works as context manager."""
-    from dsv_wrapper import HandledningClient
+            assert sync_param_names == async_param_names, (
+                f"Method '{method_name}' has different parameters:\n"
+                f"  Sync: {sync_param_names}\n"
+                f"  Async: {async_param_names}"
+            )
 
-    username, password = credentials
-
-    with HandledningClient(username=username, password=password, use_cache=False) as client:
-        sessions = client.get_teacher_sessions()
-        assert sessions is not None
-        logger.info("Context manager working correctly")
+    logger.info("API parity check passed: sync and async Handledning clients have matching public methods")

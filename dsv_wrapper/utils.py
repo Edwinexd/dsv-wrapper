@@ -21,7 +21,7 @@ DSV_SSO_TARGETS = {
     "daisy_staff": "https://daisy.dsv.su.se/login_sso_employee.jspa",
     "daisy_student": "https://daisy.dsv.su.se/login_sso_student.jspa",
     "handledning": "https://handledning.dsv.su.se",
-    "unified": "https://unified.dsv.su.se",
+    "actlab": "https://www2.dsv.su.se/act-lab/admin/",
 }
 
 # DSV system base URLs - for making API requests
@@ -30,7 +30,7 @@ DSV_URLS = {
     "daisy_student": "https://daisy.dsv.su.se",
     "handledning_desktop": "https://handledning.dsv.su.se",
     "handledning_mobile": "https://handledning.dsv.su.se/mobile",
-    "unified_sso": "https://unified.dsv.su.se",
+    "actlab": "https://www2.dsv.su.se/act-lab/admin/",
     "shibboleth_login": "https://login.su.se/idp/profile/SAML2/Redirect/SSO",
 }
 

@@ -75,7 +75,7 @@ class ACTLabClient:
         """Ensure the client is authenticated."""
         if not self._authenticated:
             logger.info("Authenticating to ACT Lab admin")
-            cookies = self.auth._login(service="unified")
+            cookies = self.auth._login(service="actlab")
             self.session.cookies.update(cookies)
             self._authenticated = True
             logger.info("Successfully authenticated to ACT Lab")
@@ -84,14 +84,12 @@ class ACTLabClient:
         self,
         file_path: str | Path,
         slide_name: str = "ACT Lab Slide",
-        auto_delete: bool = True,
     ) -> SlideUploadResult:
         """Upload a slide image to ACT Lab.
 
         Args:
             file_path: Path to image file (PNG recommended)
             slide_name: Name for the slide
-            auto_delete: Enable auto-delete when removed from show
 
         Returns:
             SlideUploadResult with upload status
@@ -118,43 +116,45 @@ class ACTLabClient:
         if not upload_form:
             raise SlideUploadError("Could not find upload form")
 
-        form_action = extract_attr(upload_form, "action") or ""
+        # Get the form action URL (where to POST to)
+        form_action_url = extract_attr(upload_form, "action") or ""
+        if not form_action_url.startswith("http"):
+            # Relative URL, make it absolute
+            form_action_url = ACTLAB_BASE_URL.rstrip("/") + "/" + form_action_url.lstrip("/")
+
+        # Get the action value from hidden input (action parameter in POST data)
+        action_input = upload_form.find("input", {"name": "action"})
+        action_value = extract_attr(action_input, "value") or "upload_file"
+
         max_file_size_input = upload_form.find("input", {"name": "MAX_FILE_SIZE"})
         max_file_size = extract_attr(max_file_size_input, "value") or "10000000"
 
         # Prepare upload data
         files = {"uploadfile": (file_path.name, open(file_path, "rb"), "image/png")}
         data = {
-            "action": form_action,
+            "action": action_value,
             "filename": slide_name,
             "MAX_FILE_SIZE": max_file_size,
         }
 
-        # Upload the file
-        logger.debug(f"Uploading file with MAX_FILE_SIZE={max_file_size}")
-        response = self.session.post(ACTLAB_BASE_URL, files=files, data=data)
+        # Upload the file to the form's action URL
+        logger.debug(f"Uploading file to {form_action_url} with MAX_FILE_SIZE={max_file_size}")
+        response = self.session.post(form_action_url, files=files, data=data, allow_redirects=True)
         response.raise_for_status()
 
-        # Parse response to get slide ID
-        soup = parse_html(response.text)
-        slides = soup.find_all("div", class_="slide")
+        # Get the new slide ID by fetching the page again and finding the max ID
+        response = self.session.get(ACTLAB_BASE_URL)
+        response.raise_for_status()
 
-        # Find the newly uploaded slide (usually the last one with matching name)
-        slide_id = None
-        for slide_div in reversed(slides):
-            slide_id_match = re.search(r"slide(\d+)", extract_attr(slide_div, "id", ""))
-            if slide_id_match:
-                slide_id = slide_id_match.group(1)
-                logger.info(f"Slide uploaded successfully with ID: {slide_id}")
-                break
+        # Find all slide IDs and get the maximum (newest upload)
+        all_slide_ids = re.findall(r'<div class="slide"\s+id="(\d+)"', response.text)
 
-        if not slide_id:
+        if not all_slide_ids:
             logger.warning("Slide uploaded but could not extract ID")
             return SlideUploadResult(success=True, message="Upload successful but ID not found")
 
-        # Configure auto-delete if requested
-        if auto_delete:
-            self._configure_slide(slide_id, auto_delete=True)
+        slide_id = max(all_slide_ids, key=int)
+        logger.info(f"Slide uploaded successfully with ID: {slide_id}")
 
         return SlideUploadResult(success=True, slide_id=slide_id, message="Upload successful")
 
@@ -191,18 +191,21 @@ class ACTLabClient:
         if auto_delete:
             data["autodelete"] = "on"
 
-        response = self.session.post(ACTLAB_BASE_URL, data=data)
+        # POST to action.php, not the base URL
+        action_url = ACTLAB_BASE_URL.rstrip("/") + "/action.php"
+        response = self.session.post(action_url, data=data, allow_redirects=True)
         response.raise_for_status()
 
         logger.debug(f"Slide {slide_id} configured successfully")
         return True
 
-    def add_slide_to_show(self, slide_id: str, show_id: str = "1") -> bool:
+    def add_slide_to_show(self, slide_id: str, show_id: str = "1", auto_delete: bool = True) -> bool:
         """Add a slide to a show.
 
         Args:
             slide_id: Slide ID
             show_id: Show ID (default: 1 for Labbet)
+            auto_delete: Enable auto-delete when removed from show (default: True)
 
         Returns:
             True if successful
@@ -211,12 +214,19 @@ class ACTLabClient:
 
         logger.info(f"Adding slide {slide_id} to show {show_id}")
 
-        data = {"action": "add", "add": slide_id, "to": show_id}
+        data = {"action": "add_slide_to_show", "add": slide_id, "to": show_id}
 
-        response = self.session.post(ACTLAB_BASE_URL, data=data)
+        # POST to action.php, not the base URL
+        action_url = ACTLAB_BASE_URL.rstrip("/") + "/action.php"
+        response = self.session.post(action_url, data=data, allow_redirects=True)
         response.raise_for_status()
 
         logger.info(f"Slide {slide_id} added to show {show_id}")
+
+        # Configure auto-delete after adding to show
+        if auto_delete:
+            self._configure_slide(slide_id, show_id, auto_delete=True)
+
         return True
 
     def remove_slide_from_show(self, slide_id: str, show_id: str = "1") -> bool:
@@ -235,7 +245,9 @@ class ACTLabClient:
 
         data = {"action": "remove", "remove": slide_id, "from": show_id}
 
-        response = self.session.post(ACTLAB_BASE_URL, data=data)
+        # POST to action.php, not the base URL
+        action_url = ACTLAB_BASE_URL.rstrip("/") + "/action.php"
+        response = self.session.post(action_url, data=data, allow_redirects=True)
         response.raise_for_status()
 
         logger.info(f"Slide {slide_id} removed from show {show_id}")
@@ -259,11 +271,10 @@ class ACTLabClient:
 
         slide_divs = soup.find_all("div", class_="slide")
         for slide_div in slide_divs:
-            slide_id_attr = extract_attr(slide_div, "id", "")
-            slide_id_match = re.search(r"slide(\d+)", slide_id_attr)
+            # Slide IDs are just numbers, not "slideXX"
+            slide_id = extract_attr(slide_div, "id", "")
 
-            if slide_id_match:
-                slide_id = slide_id_match.group(1)
+            if slide_id and slide_id.isdigit():
                 name_elem = slide_div.find(class_="slide-name")
                 name = extract_text(name_elem) if name_elem else f"Slide {slide_id}"
 
@@ -291,8 +302,8 @@ class ACTLabClient:
 
         soup = parse_html(response.text)
 
-        # Find the show div
-        show_div = soup.find("div", {"id": f"show{show_id}"})
+        # Find the show div (show IDs are just numbers, not "showXX")
+        show_div = soup.find("div", {"id": show_id, "class": "show"})
         if not show_div:
             logger.warning(f"Show {show_id} not found")
             return 0
@@ -302,9 +313,10 @@ class ACTLabClient:
         slide_ids = []
 
         for slide_div in slide_divs:
-            slide_id_match = re.search(r"slide(\d+)", extract_attr(slide_div, "id", ""))
-            if slide_id_match:
-                slide_ids.append(slide_id_match.group(1))
+            # Slide IDs are just numbers, not "slideXX"
+            id_attr = extract_attr(slide_div, "id", "")
+            if id_attr and id_attr.isdigit():
+                slide_ids.append(id_attr)
 
         # Remove all but the latest N slides
         if len(slide_ids) > keep_latest:
@@ -340,7 +352,6 @@ class AsyncACTLabClient(BaseAsyncClient):
         self,
         username: Optional[str] = None,
         password: Optional[str] = None,
-        use_cache: bool = True,
         cache_backend: Optional[CacheBackend] = None,
         cache_ttl: int = 86400,
     ):
@@ -349,8 +360,7 @@ class AsyncACTLabClient(BaseAsyncClient):
         Args:
             username: SU username (default: read from SU_USERNAME env var)
             password: SU password (default: read from SU_PASSWORD env var)
-            use_cache: Whether to cache authentication cookies (default: True with MemoryCache)
-            cache_backend: Custom cache backend (overrides use_cache if provided)
+            cache_backend: Cache backend for authentication cookies (default: NullCache)
             cache_ttl: Cache TTL in seconds (default: 86400 = 24 hours)
 
         Raises:
@@ -370,8 +380,7 @@ class AsyncACTLabClient(BaseAsyncClient):
             username=username,
             password=password,
             base_url=ACTLAB_BASE_URL,
-            service="unified",
-            use_cache=use_cache,
+            service="actlab",
             cache_backend=cache_backend,
             cache_ttl=cache_ttl,
         )
@@ -396,11 +405,10 @@ class AsyncACTLabClient(BaseAsyncClient):
 
         slide_divs = soup.find_all("div", class_="slide")
         for slide_div in slide_divs:
-            slide_id_attr = extract_attr(slide_div, "id", "")
-            slide_id_match = re.search(r"slide(\d+)", slide_id_attr)
+            # Slide IDs are just numbers, not "slideXX"
+            slide_id = extract_attr(slide_div, "id", "")
 
-            if slide_id_match:
-                slide_id = slide_id_match.group(1)
+            if slide_id and slide_id.isdigit():
                 name_elem = slide_div.find(class_="slide-name")
                 name = extract_text(name_elem) if name_elem else f"Slide {slide_id}"
 
@@ -409,12 +417,54 @@ class AsyncACTLabClient(BaseAsyncClient):
         logger.info(f"Found {len(slides)} slides")
         return slides
 
-    async def add_slide_to_show(self, slide_id: str, show_id: str = "1") -> bool:
+    async def _configure_slide(
+        self,
+        slide_id: str,
+        show_id: str = "1",
+        auto_delete: bool = True,
+        start_time: str = "",
+        end_time: str = "",
+    ) -> bool:
+        """Configure slide settings.
+
+        Args:
+            slide_id: Slide ID
+            show_id: Show ID (default: 1 for Labbet)
+            auto_delete: Enable auto-delete
+            start_time: Start time for display
+            end_time: End time for display
+
+        Returns:
+            True if configuration successful
+        """
+        logger.debug(f"Configuring slide {slide_id} with auto_delete={auto_delete}")
+
+        data = {
+            "action": "configure_slide",
+            "showid": show_id,
+            "slideid": slide_id,
+            "starttime": start_time,
+            "endtime": end_time,
+        }
+
+        if auto_delete:
+            data["autodelete"] = "on"
+
+        # POST to action.php, not the base URL
+        action_url = ACTLAB_BASE_URL.rstrip("/") + "/action.php"
+        async with self.session.post(action_url, data=data, allow_redirects=True) as response:
+            response.raise_for_status()
+
+        logger.debug(f"Slide {slide_id} configured successfully")
+        return True
+
+    async def add_slide_to_show(self, slide_id: str, show_id: str = "1", auto_delete: bool = True) -> bool:
         """Add a slide to a show.
 
         Args:
             slide_id: Slide ID
             show_id: Show ID (default: 1 for Labbet)
+            auto_delete: Enable auto-delete when removed from show (default: True)
 
         Returns:
             True if successful
@@ -423,12 +473,19 @@ class AsyncACTLabClient(BaseAsyncClient):
 
         logger.info(f"Adding slide {slide_id} to show {show_id}")
 
-        data = {"action": "add", "add": slide_id, "to": show_id}
+        data = {"action": "add_slide_to_show", "add": slide_id, "to": show_id}
 
-        async with self.session.post(ACTLAB_BASE_URL, data=data) as response:
+        # POST to action.php, not the base URL
+        action_url = ACTLAB_BASE_URL.rstrip("/") + "/action.php"
+        async with self.session.post(action_url, data=data, allow_redirects=True) as response:
             response.raise_for_status()
 
         logger.info(f"Slide {slide_id} added to show {show_id}")
+
+        # Configure auto-delete after adding to show
+        if auto_delete:
+            await self._configure_slide(slide_id, show_id, auto_delete=True)
+
         return True
 
     async def remove_slide_from_show(self, slide_id: str, show_id: str = "1") -> bool:
@@ -447,8 +504,143 @@ class AsyncACTLabClient(BaseAsyncClient):
 
         data = {"action": "remove", "remove": slide_id, "from": show_id}
 
-        async with self.session.post(ACTLAB_BASE_URL, data=data) as response:
+        # POST to action.php, not the base URL
+        action_url = ACTLAB_BASE_URL.rstrip("/") + "/action.php"
+        async with self.session.post(action_url, data=data, allow_redirects=True) as response:
             response.raise_for_status()
 
         logger.info(f"Slide {slide_id} removed from show {show_id}")
         return True
+
+    async def upload_slide(
+        self,
+        file_path: str | Path,
+        slide_name: str = "ACT Lab Slide",
+    ) -> SlideUploadResult:
+        """Upload a slide image to ACT Lab.
+
+        Args:
+            file_path: Path to image file (PNG recommended)
+            slide_name: Name for the slide
+
+        Returns:
+            SlideUploadResult with upload status
+
+        Raises:
+            SlideUploadError: If upload fails
+        """
+        await self._ensure_authenticated()
+
+        file_path = Path(file_path)
+        if not file_path.exists():
+            raise SlideUploadError(f"File not found: {file_path}")
+
+        logger.info(f"Uploading slide: {slide_name} from {file_path}")
+
+        # Get the admin page to extract form action and MAX_FILE_SIZE
+        async with self.session.get(ACTLAB_BASE_URL) as response:
+            response.raise_for_status()
+            html = await response.text()
+
+        soup = parse_html(html)
+
+        # Find upload form
+        upload_form = soup.find("form", {"enctype": "multipart/form-data"})
+        if not upload_form:
+            raise SlideUploadError("Could not find upload form")
+
+        # Get the form action URL (where to POST to)
+        form_action_url = extract_attr(upload_form, "action") or ""
+        if not form_action_url.startswith("http"):
+            # Relative URL, make it absolute
+            form_action_url = ACTLAB_BASE_URL.rstrip("/") + "/" + form_action_url.lstrip("/")
+
+        # Get the action value from hidden input (action parameter in POST data)
+        action_input = upload_form.find("input", {"name": "action"})
+        action_value = extract_attr(action_input, "value") or "upload_file"
+
+        max_file_size_input = upload_form.find("input", {"name": "MAX_FILE_SIZE"})
+        max_file_size = extract_attr(max_file_size_input, "value") or "10000000"
+
+        # Prepare upload data
+        form_data = aiohttp.FormData()
+        form_data.add_field("action", action_value)
+        form_data.add_field("filename", slide_name)
+        form_data.add_field("MAX_FILE_SIZE", max_file_size)
+        form_data.add_field(
+            "uploadfile",
+            open(file_path, "rb"),
+            filename=file_path.name,
+            content_type="image/png",
+        )
+
+        # Upload the file to the form's action URL
+        logger.debug(f"Uploading file to {form_action_url} with MAX_FILE_SIZE={max_file_size}")
+        async with self.session.post(form_action_url, data=form_data, allow_redirects=True) as response:
+            response.raise_for_status()
+
+        # Get the new slide ID by fetching the page again and finding the max ID
+        async with self.session.get(ACTLAB_BASE_URL) as response:
+            response.raise_for_status()
+            html = await response.text()
+
+        # Find all slide IDs and get the maximum (newest upload)
+        all_slide_ids = re.findall(r'<div class="slide"\s+id="(\d+)"', html)
+
+        if not all_slide_ids:
+            logger.warning("Slide uploaded but could not extract ID")
+            return SlideUploadResult(success=True, message="Upload successful but ID not found")
+
+        slide_id = max(all_slide_ids, key=int)
+        logger.info(f"Slide uploaded successfully with ID: {slide_id}")
+
+        return SlideUploadResult(success=True, slide_id=slide_id, message="Upload successful")
+
+    async def cleanup_old_slides(self, show_id: str = "1", keep_latest: int = 1) -> int:
+        """Remove old slides from a show, keeping only the latest N.
+
+        Args:
+            show_id: Show ID (default: 1 for Labbet)
+            keep_latest: Number of latest slides to keep
+
+        Returns:
+            Number of slides removed
+        """
+        await self._ensure_authenticated()
+
+        logger.info(f"Cleaning up slides in show {show_id}, keeping latest {keep_latest}")
+
+        async with self.session.get(ACTLAB_BASE_URL) as response:
+            response.raise_for_status()
+            html = await response.text()
+
+        soup = parse_html(html)
+
+        # Find the show div (show IDs are just numbers, not "showXX")
+        show_div = soup.find("div", {"id": show_id, "class": "show"})
+        if not show_div:
+            logger.warning(f"Show {show_id} not found")
+            return 0
+
+        # Get all slides in the show
+        slide_divs = show_div.find_all("div", class_="slide")
+        slide_ids = []
+
+        for slide_div in slide_divs:
+            # Slide IDs are just numbers, not "slideXX"
+            id_attr = extract_attr(slide_div, "id", "")
+            if id_attr and id_attr.isdigit():
+                slide_ids.append(id_attr)
+
+        # Remove all but the latest N slides
+        if len(slide_ids) > keep_latest:
+            slides_to_remove = slide_ids[:-keep_latest]
+            logger.info(f"Removing {len(slides_to_remove)} old slides")
+
+            for slide_id in slides_to_remove:
+                await self.remove_slide_from_show(slide_id, show_id)
+
+            return len(slides_to_remove)
+
+        logger.info("No slides to remove")
+        return 0
