@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from requests.cookies import RequestsCookieJar
+import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +18,7 @@ class CacheBackend(ABC):
     """
 
     @abstractmethod
-    def get(self, key: str) -> RequestsCookieJar | None:
+    def get(self, key: str) -> httpx.Cookies | None:
         """Get cached cookies by key.
 
         Args:
@@ -30,7 +30,7 @@ class CacheBackend(ABC):
         pass
 
     @abstractmethod
-    def set(self, key: str, cookies: RequestsCookieJar, ttl: int | None = None) -> None:
+    def set(self, key: str, cookies: httpx.Cookies, ttl: int | None = None) -> None:
         """Set cached cookies with optional TTL.
 
         Args:
@@ -61,10 +61,10 @@ class NullCache(CacheBackend):
     Use this when you don't want any caching.
     """
 
-    def get(self, key: str) -> RequestsCookieJar | None:
+    def get(self, key: str) -> httpx.Cookies | None:
         return None
 
-    def set(self, key: str, cookies: RequestsCookieJar, ttl: int | None = None) -> None:
+    def set(self, key: str, cookies: httpx.Cookies, ttl: int | None = None) -> None:
         pass
 
     def delete(self, key: str) -> None:
@@ -87,9 +87,9 @@ class MemoryCache(CacheBackend):
             default_ttl: Default time-to-live in seconds (default: 24 hours)
         """
         self.default_ttl = default_ttl
-        self._cache: dict[str, tuple[RequestsCookieJar, datetime]] = {}
+        self._cache: dict[str, tuple[httpx.Cookies, datetime]] = {}
 
-    def get(self, key: str) -> RequestsCookieJar | None:
+    def get(self, key: str) -> httpx.Cookies | None:
         if key not in self._cache:
             return None
 
@@ -103,7 +103,7 @@ class MemoryCache(CacheBackend):
         logger.debug(f"Cache hit for key: {key}")
         return cookies
 
-    def set(self, key: str, cookies: RequestsCookieJar, ttl: int | None = None) -> None:
+    def set(self, key: str, cookies: httpx.Cookies, ttl: int | None = None) -> None:
         ttl = ttl if ttl is not None else self.default_ttl
         expires_at = datetime.now() + timedelta(seconds=ttl)
         self._cache[key] = (cookies, expires_at)
@@ -143,7 +143,7 @@ class FileCache(CacheBackend):
         safe_key = key.replace("/", "_").replace("\\", "_")
         return self.cache_dir / f"{safe_key}.json"
 
-    def get(self, key: str) -> RequestsCookieJar | None:
+    def get(self, key: str) -> httpx.Cookies | None:
         cache_path = self._get_cache_path(key)
 
         if not cache_path.exists():
@@ -160,10 +160,10 @@ class FileCache(CacheBackend):
                 cache_path.unlink()
                 return None
 
-            # Reconstruct cookies
-            jar = RequestsCookieJar()
+            # Reconstruct cookies as httpx.Cookies
+            cookies = httpx.Cookies()
             for cookie_data in data["cookies"]:
-                jar.set(
+                cookies.set(
                     cookie_data["name"],
                     cookie_data["value"],
                     domain=cookie_data.get("domain"),
@@ -171,7 +171,7 @@ class FileCache(CacheBackend):
                 )
 
             logger.debug(f"Cache hit for key: {key}")
-            return jar
+            return cookies
 
         except (json.JSONDecodeError, KeyError, ValueError) as e:
             logger.warning(f"Failed to load cache for key {key}: {e}")
@@ -182,7 +182,7 @@ class FileCache(CacheBackend):
         ttl = ttl if ttl is not None else self.default_ttl
         expires_at = datetime.now() + timedelta(seconds=ttl)
 
-        # Serialize cookies - handle both dict and RequestsCookieJar
+        # Serialize cookies - handle both dict and httpx.Cookies
         if isinstance(cookies, dict):
             cookies_data = [
                 {
@@ -194,7 +194,7 @@ class FileCache(CacheBackend):
                 for name, value in cookies.items()
             ]
         else:
-            # RequestsCookieJar or similar iterable of cookie objects
+            # httpx.Cookies or similar iterable of cookie objects
             cookies_data = [
                 {
                     "name": cookie.name,
@@ -202,7 +202,7 @@ class FileCache(CacheBackend):
                     "domain": cookie.domain,
                     "path": cookie.path,
                 }
-                for cookie in cookies
+                for cookie in cookies.jar
             ]
 
         data = {

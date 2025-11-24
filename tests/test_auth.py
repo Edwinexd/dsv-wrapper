@@ -102,14 +102,14 @@ def test_shibboleth_auth_handledning(credentials):
 
 def test_cookie_cache_operations(tmp_path):
     """Test cookie cache operations."""
-    from requests.cookies import RequestsCookieJar
+    import httpx
 
     from dsv_wrapper import FileCache
 
     cache = FileCache(cache_dir=tmp_path, default_ttl=3600)
 
     # Create test cookies
-    cookies = RequestsCookieJar()
+    cookies = httpx.Cookies()
     cookies.set("test_cookie", "test_value", domain="example.com", path="/")
 
     # Test set
@@ -129,14 +129,14 @@ def test_cookie_cache_operations(tmp_path):
 
 def test_cookie_cache_expiry(tmp_path):
     """Test cookie cache expiry."""
-    from requests.cookies import RequestsCookieJar
+    import httpx
 
     from dsv_wrapper import FileCache
 
     # Create cache with very short TTL (1 second)
     cache = FileCache(cache_dir=tmp_path, default_ttl=1)
 
-    cookies = RequestsCookieJar()
+    cookies = httpx.Cookies()
     cookies.set("test_cookie", "test_value")
 
     cache.set("test_key", cookies)

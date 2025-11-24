@@ -5,7 +5,7 @@ import pickle
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from requests.cookies import RequestsCookieJar
+import httpx
 
 
 class CookieCache:
@@ -44,14 +44,14 @@ class CookieCache:
         ext = ".pkl" if self.use_pickle else ".json"
         return self.cache_dir / f"{key}{ext}"
 
-    def get(self, key: str) -> RequestsCookieJar | None:
+    def get(self, key: str) -> httpx.Cookies | None:
         """Get cookies from cache.
 
         Args:
             key: Cache key
 
         Returns:
-            RequestsCookieJar if found and valid, None otherwise
+            httpx.Cookies if found and valid, None otherwise
         """
         cache_path = self._get_cache_path(key)
 
@@ -73,7 +73,7 @@ class CookieCache:
                 return None
 
             # Restore cookies
-            cookies = RequestsCookieJar()
+            cookies = httpx.Cookies()
             for cookie_data in data["cookies"]:
                 cookies.set(**cookie_data)
 
@@ -84,18 +84,18 @@ class CookieCache:
             cache_path.unlink(missing_ok=True)
             return None
 
-    def set(self, key: str, cookies: RequestsCookieJar) -> None:
+    def set(self, key: str, cookies: httpx.Cookies) -> None:
         """Store cookies in cache.
 
         Args:
             key: Cache key
-            cookies: RequestsCookieJar to cache
+            cookies: httpx.Cookies to cache
         """
         cache_path = self._get_cache_path(key)
 
         # Serialize cookies
         cookies_data = []
-        for cookie in cookies:
+        for cookie in cookies.jar:
             cookies_data.append(
                 {
                     "name": cookie.name,

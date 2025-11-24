@@ -85,9 +85,8 @@ class ShibbolethAuth:
             logger.debug(f"Performing SSO login to {service}")
             cookies = self._perform_login(service)
 
-            # Cache the cookies - pass jar directly to preserve domain/path info
-            # Use jar instead of cookies to avoid CookieConflict with duplicate names
-            self.cache_backend.set(cache_key, self._client.cookies.jar, ttl=self.cache_ttl)
+            # Cache the cookies
+            self.cache_backend.set(cache_key, self._client.cookies, ttl=self.cache_ttl)
             logger.debug(f"Cached authentication cookies with key: {cache_key}")
 
             logger.info(f"Successfully authenticated to {service}")
