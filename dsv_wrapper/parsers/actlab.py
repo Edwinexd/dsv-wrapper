@@ -1,15 +1,15 @@
 """ACT Lab HTML parsing functions."""
 
 import re
-from typing import Optional
 
+from ..exceptions import DSVWrapperError
 from ..models.actlab import Slide
 from ..utils import extract_attr, extract_text, parse_html
-from ..exceptions import DSVWrapperError
 
 
 class SlideUploadError(DSVWrapperError):
     """Raised when slide upload fails."""
+
     pass
 
 
@@ -96,7 +96,7 @@ def parse_upload_form(html: str, base_url: str) -> tuple[str, str, str]:
     return form_action_url, action_value, max_file_size
 
 
-def find_newest_slide_id(html: str) -> Optional[str]:
+def find_newest_slide_id(html: str) -> str | None:
     """Find the newest slide ID from HTML.
 
     Args:

@@ -5,8 +5,8 @@ import logging
 
 import pytest
 
-from dsv_wrapper.handledning import AsyncHandledningClient, HandledningClient
 from dsv_wrapper.exceptions import HandledningError
+from dsv_wrapper.handledning import AsyncHandledningClient, HandledningClient
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +76,8 @@ def test_sync_async_handledning_api_parity():
     missing_in_async = {m for m in missing_in_async if m not in {"__enter__", "__exit__", "close"}}
 
     assert not missing_in_async, (
-        f"Async Handledning client is missing these public methods from sync client: {missing_in_async}"
+        f"Async Handledning client is missing these public methods "
+        f"from sync client: {missing_in_async}"
     )
 
     # Verify method signatures match (excluding self and accounting for async)
@@ -102,4 +103,6 @@ def test_sync_async_handledning_api_parity():
                 f"  Async: {async_param_names}"
             )
 
-    logger.info("API parity check passed: sync and async Handledning clients have matching public methods")
+    logger.info(
+        "API parity check passed: sync and async Handledning clients have matching public methods"
+    )

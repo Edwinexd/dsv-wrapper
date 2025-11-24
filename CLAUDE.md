@@ -97,6 +97,23 @@
   - All authentication issues resolved
   - Empty staff search now works correctly (returns 300+ results)
 
+## Code Quality and Linting
+
+- **Linter: ruff** - Fast Python linter configured with strict rules
+- **Pre-commit hooks**: Automatically run linting before every commit
+- **Rules enforced**:
+  - BLE (flake8-blind-except): No bare `except Exception:` - must catch specific exceptions
+  - B (flake8-bugbear): Common Python bugs and design problems
+  - A (flake8-builtins): Shadowing of Python builtins
+  - C4 (flake8-comprehensions): Unnecessary comprehensions
+  - I (isort): Import sorting
+  - N (pep8-naming): PEP 8 naming conventions
+  - UP (pyupgrade): Modern Python syntax
+  - E/W/F (pycodestyle/pyflakes): Standard Python errors and warnings
+- **Exception chaining**: Always use `raise ... from e` when converting exceptions
+- **Running the linter**: `ruff check .` (run from project root)
+- **Auto-fix issues**: `ruff check . --fix`
+
 ## Testing Notes
 
 - **Test coverage: 29/29 passing - 100%!**
@@ -105,4 +122,3 @@
 - All ACTLab, Daisy, and Handledning tests pass with new httpx implementation
 - Cookie handling fixed: domain/path properly preserved in async clients
 - Enum serialization fixed: InstitutionID properly converted to value in form data
-- dont catch bare exception

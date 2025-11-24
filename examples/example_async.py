@@ -9,10 +9,10 @@ from dsv_wrapper.models import RoomCategory
 
 async def main():
     """Main async function."""
-    USERNAME = "your_username"
-    PASSWORD = "your_password"
+    username = "your_username"
+    password = "your_password"
 
-    async with AsyncDSVClient(username=USERNAME, password=PASSWORD) as client:
+    async with AsyncDSVClient(username=username, password=password) as client:
         print("=== Async DSVClient Example ===\n")
 
         # Get Daisy client

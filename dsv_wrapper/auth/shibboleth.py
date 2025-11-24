@@ -1,13 +1,12 @@
 """Shibboleth SSO authentication handlers."""
 
 import logging
-import re
-from typing import Literal, Optional
+from typing import Literal
 
 import httpx
 
 from ..exceptions import AuthenticationError, NetworkError
-from ..utils import DEFAULT_HEADERS, DSV_SSO_TARGETS, DSV_URLS, extract_attr, parse_html
+from ..utils import DEFAULT_HEADERS, DSV_SSO_TARGETS, extract_attr, parse_html
 from .cache_backend import CacheBackend, NullCache
 
 logger = logging.getLogger(__name__)
@@ -22,7 +21,7 @@ class ShibbolethAuth:
         self,
         username: str,
         password: str,
-        cache_backend: Optional[CacheBackend] = None,
+        cache_backend: CacheBackend | None = None,
         cache_ttl: int = 86400,
     ):
         """Initialize Shibboleth authenticator.
@@ -42,7 +41,9 @@ class ShibbolethAuth:
         logger.debug(f"Initialized ShibbolethAuth for user: {username}")
         logger.debug(f"Cache backend: {type(self.cache_backend).__name__}")
 
-    def _login(self, service: ServiceType = "daisy_staff", validate_cache: bool = True) -> httpx.Cookies:
+    def _login(
+        self, service: ServiceType = "daisy_staff", validate_cache: bool = True
+    ) -> httpx.Cookies:
         """Perform SSO login and get authenticated cookies (internal use only).
 
         Args:
@@ -133,7 +134,7 @@ class ShibbolethAuth:
             logger.debug("Validation passed")
             return True
 
-        except Exception as e:
+        except (httpx.HTTPError, httpx.TimeoutException) as e:
             logger.warning(f"Cookie validation failed with error: {e}")
             return False
 
@@ -232,7 +233,9 @@ class ShibbolethAuth:
                 html_lower = response.text.lower()
                 # Check if this looks like a login or error page
                 if "log in" in html_lower[:1000] or "login" in html_lower[:500]:
-                    if "<form" in html_lower[:2000] and ("password" in html_lower[:2000] or "submit" in html_lower[:2000]):
+                    if "<form" in html_lower[:2000] and (
+                        "password" in html_lower[:2000] or "submit" in html_lower[:2000]
+                    ):
                         logger.error("Still on login page after authentication attempt")
                         raise AuthenticationError("Authentication failed: Invalid credentials")
 
@@ -261,11 +264,13 @@ class ShibbolethAuth:
                     login_data[name] = value or ""
 
             # Update with username and password
-            login_data.update({
-                "j_username": self.username,
-                "j_password": self.password,
-                "_eventId_proceed": "",
-            })
+            login_data.update(
+                {
+                    "j_username": self.username,
+                    "j_password": self.password,
+                    "_eventId_proceed": "",
+                }
+            )
 
             # Remove SPNEGO-related fields (per old login.py)
             login_data.pop("_eventId_authn/SPNEGO", None)
@@ -352,7 +357,8 @@ class ShibbolethAuth:
             raise AuthenticationError("Authentication failed: No session cookies found")
 
         # Note: We don't validate cookies here because validation can be unreliable
-        # (HTTP 200 doesn't mean success in Daisy). Let real requests fail naturally if auth didn't work.
+        # (HTTP 200 doesn't mean success in Daisy). Let real requests fail
+        # naturally if auth didn't work.
         logger.debug("Authentication flow completed successfully")
         return self._client.cookies
 
@@ -417,7 +423,7 @@ class AsyncShibbolethAuth:
         self,
         username: str,
         password: str,
-        cache_backend: Optional[CacheBackend] = None,
+        cache_backend: CacheBackend | None = None,
         cache_ttl: int = 86400,
     ):
         """Initialize async Shibboleth authenticator.

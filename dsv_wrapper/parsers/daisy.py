@@ -7,7 +7,7 @@ from urllib.parse import urlparse
 
 from ..exceptions import ParseError
 from ..models import RoomActivity, RoomCategory, RoomTime, Schedule, Staff, Student
-from ..utils import DSV_URLS, extract_text, parse_html, parse_time
+from ..utils import extract_text, parse_html, parse_time
 
 logger = logging.getLogger(__name__)
 
@@ -99,20 +99,16 @@ def parse_schedule(html: str) -> Schedule:
                         )
                     )
                 except (ValueError, KeyError) as e:
-                    raise ParseError(f"Failed to parse activity time slot: {e}")
+                    raise ParseError(f"Failed to parse activity time slot: {e}") from e
 
     # Extract metadata
     room_category_title = extract_text(rows[0].find_all("td")[1].find("b"))
     category_link = rows[0].find_all("td")[1].find("a")
-    room_category_id = int(
-        category_link.get("href").split("&")[1].split("=")[1]
-    )
+    room_category_id = int(category_link.get("href").split("&")[1].split("=")[1])
 
     date_column = list(rows[0].find_all("td")[1].children)[2]
     date_match = re.findall(r"(\d{4})-(\d{2})-(\d{2})", str(date_column))[0]
-    schedule_datetime = datetime(
-        int(date_match[0]), int(date_match[1]), int(date_match[2])
-    )
+    schedule_datetime = datetime(int(date_match[0]), int(date_match[1]), int(date_match[2]))
 
     return Schedule(
         activities=activities,
@@ -151,9 +147,7 @@ def parse_students(html: str) -> list[Student]:
         student = Student(
             username=username,
             first_name=extract_text(name_cell).split()[0] if name_cell else None,
-            last_name=(
-                " ".join(extract_text(name_cell).split()[1:]) if name_cell else None
-            ),
+            last_name=(" ".join(extract_text(name_cell).split()[1:]) if name_cell else None),
             email=extract_text(email_cell) if email_cell else None,
             program=extract_text(program_cell) if program_cell else None,
         )
@@ -202,7 +196,7 @@ def parse_activities(html: str, room_id: str, schedule_date: date) -> list[RoomA
                 )
                 activities.append(activity)
             except ValueError as e:
-                raise ParseError(f"Failed to parse activity times: {e}")
+                raise ParseError(f"Failed to parse activity times: {e}") from e
 
     return activities
 

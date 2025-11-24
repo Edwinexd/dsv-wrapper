@@ -1,7 +1,5 @@
 """Common Pydantic models shared across DSV systems."""
 
-from typing import Optional
-
 from pydantic import BaseModel, Field
 
 
@@ -9,11 +7,11 @@ class Student(BaseModel):
     """Student model."""
 
     username: str
-    first_name: Optional[str] = None
-    last_name: Optional[str] = None
-    email: Optional[str] = None
-    student_id: Optional[str] = None
-    program: Optional[str] = None
+    first_name: str | None = None
+    last_name: str | None = None
+    email: str | None = None
+    student_id: str | None = None
+    program: str | None = None
 
     model_config = {"frozen": True}
 
@@ -29,13 +27,13 @@ class Teacher(BaseModel):
     """Teacher model."""
 
     username: str
-    first_name: Optional[str] = None
-    last_name: Optional[str] = None
-    email: Optional[str] = None
-    title: Optional[str] = None
-    department: Optional[str] = None
-    room: Optional[str] = None
-    phone: Optional[str] = None
+    first_name: str | None = None
+    last_name: str | None = None
+    email: str | None = None
+    title: str | None = None
+    department: str | None = None
+    room: str | None = None
+    phone: str | None = None
 
     model_config = {"frozen": True}
 
@@ -52,9 +50,9 @@ class Course(BaseModel):
 
     code: str
     name: str
-    credits: Optional[float] = None
-    level: Optional[str] = None
-    period: Optional[str] = None
+    credits: float | None = None
+    level: str | None = None
+    period: str | None = None
     teachers: list[Teacher] = Field(default_factory=list)
 
     model_config = {"frozen": True}

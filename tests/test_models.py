@@ -3,11 +3,7 @@
 import logging
 from datetime import date, datetime, time
 
-import pytest
-from pydantic import ValidationError
-
 from dsv_wrapper.models import (
-    ActivityType,
     BookingSlot,
     Course,
     HandledningSession,

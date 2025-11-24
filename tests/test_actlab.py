@@ -3,8 +3,6 @@
 import inspect
 import logging
 
-import pytest
-
 from dsv_wrapper.actlab import ACTLabClient, AsyncACTLabClient
 
 logger = logging.getLogger(__name__)
@@ -59,4 +57,6 @@ def test_sync_async_actlab_api_parity():
                 f"  Async: {async_param_names}"
             )
 
-    logger.info("API parity check passed: sync and async ACTLab clients have matching public methods")
+    logger.info(
+        "API parity check passed: sync and async ACTLab clients have matching public methods"
+    )

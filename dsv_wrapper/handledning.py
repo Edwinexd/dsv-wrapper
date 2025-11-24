@@ -2,8 +2,6 @@
 
 import os
 import re
-from datetime import date, datetime, time
-from typing import Optional
 
 import httpx
 
@@ -13,19 +11,14 @@ from .exceptions import AuthenticationError, HandledningError, QueueError
 from .models import (
     HandledningSession,
     QueueEntry,
-    QueueStatus,
-    Student,
-    Teacher,
 )
 from .parsers import handledning as handledning_parsers
 from .utils import (
     DEFAULT_HEADERS,
     DSV_URLS,
     build_url,
-    extract_attr,
     extract_text,
     parse_html,
-    parse_time,
 )
 
 
@@ -34,10 +27,10 @@ class HandledningClient:
 
     def __init__(
         self,
-        username: Optional[str] = None,
-        password: Optional[str] = None,
+        username: str | None = None,
+        password: str | None = None,
         mobile: bool = False,
-        cache_backend: Optional[CacheBackend] = None,
+        cache_backend: CacheBackend | None = None,
         cache_ttl: int = 86400,
     ):
         """Initialize Handledning client.
@@ -63,27 +56,24 @@ class HandledningClient:
             )
         self.mobile = mobile
         self.base_url = DSV_URLS["handledning_mobile" if mobile else "handledning_desktop"]
-        self.auth = ShibbolethAuth(self.username, self.password, cache_backend=cache_backend, cache_ttl=cache_ttl)
+        self.auth = ShibbolethAuth(
+            self.username, self.password, cache_backend=cache_backend, cache_ttl=cache_ttl
+        )
         self._client = httpx.Client(headers=DEFAULT_HEADERS, follow_redirects=True)
         self._authenticated = False
 
     def _ensure_authenticated(self) -> None:
         """Ensure the client is authenticated."""
         if not self._authenticated:
-            cookies = self.auth._login("handledning")
+            self.auth._login("handledning")
             # Copy cookies from auth client to this client
             for cookie in self.auth._client.cookies.jar:
                 self._client.cookies.set(
-                    cookie.name,
-                    cookie.value,
-                    domain=cookie.domain,
-                    path=cookie.path
+                    cookie.name, cookie.value, domain=cookie.domain, path=cookie.path
                 )
             self._authenticated = True
 
-    def get_teacher_sessions(
-        self, teacher_username: Optional[str] = None
-    ) -> list[HandledningSession]:
+    def get_teacher_sessions(self, teacher_username: str | None = None) -> list[HandledningSession]:
         """Get all active sessions for a teacher.
 
         Args:
@@ -120,7 +110,7 @@ class HandledningClient:
 
         return handledning_parsers.parse_queue(response.text)
 
-    def add_to_queue(self, session_id: str, student_username: Optional[str] = None) -> bool:
+    def add_to_queue(self, session_id: str, student_username: str | None = None) -> bool:
         """Add a student to the queue.
 
         Args:
@@ -254,16 +244,15 @@ class HandledningClient:
         self.close()
 
 
-
 class AsyncHandledningClient:
     """Asynchronous client for Handledning system."""
 
     def __init__(
         self,
-        username: Optional[str] = None,
-        password: Optional[str] = None,
+        username: str | None = None,
+        password: str | None = None,
         mobile: bool = False,
-        cache_backend: Optional[CacheBackend] = None,
+        cache_backend: CacheBackend | None = None,
         cache_ttl: int = 86400,
     ):
         """Initialize async Handledning client.
@@ -290,8 +279,10 @@ class AsyncHandledningClient:
 
         self.mobile = mobile
         self.base_url = DSV_URLS["handledning_mobile" if mobile else "handledning_desktop"]
-        self.auth = AsyncShibbolethAuth(self.username, self.password, cache_backend=cache_backend, cache_ttl=cache_ttl)
-        self._client: Optional[httpx.AsyncClient] = None
+        self.auth = AsyncShibbolethAuth(
+            self.username, self.password, cache_backend=cache_backend, cache_ttl=cache_ttl
+        )
+        self._client: httpx.AsyncClient | None = None
         self._authenticated = False
 
     async def __aenter__(self):
@@ -309,19 +300,16 @@ class AsyncHandledningClient:
     async def _ensure_authenticated(self) -> None:
         """Ensure the client is authenticated."""
         if not self._authenticated:
-            cookies = await self.auth.login(service="handledning")
+            await self.auth.login(service="handledning")
             # Copy cookies from auth client to this client (preserve domain/path)
             for cookie in self.auth._sync_auth._client.cookies.jar:
                 self._client.cookies.set(
-                    cookie.name,
-                    cookie.value,
-                    domain=cookie.domain,
-                    path=cookie.path
+                    cookie.name, cookie.value, domain=cookie.domain, path=cookie.path
                 )
             self._authenticated = True
 
     async def get_teacher_sessions(
-        self, teacher_username: Optional[str] = None
+        self, teacher_username: str | None = None
     ) -> list[HandledningSession]:
         """Get all active sessions for a teacher.
 
@@ -359,7 +347,7 @@ class AsyncHandledningClient:
 
         return handledning_parsers.parse_queue(response.text)
 
-    async def add_to_queue(self, session_id: str, student_username: Optional[str] = None) -> bool:
+    async def add_to_queue(self, session_id: str, student_username: str | None = None) -> bool:
         """Add a student to the queue.
 
         Args:

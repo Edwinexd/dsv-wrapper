@@ -60,9 +60,7 @@ def daisy_client(credentials):
 
     username, password = credentials
 
-    client = DaisyClient(
-        username=username, password=password, service="daisy_staff"
-    )
+    client = DaisyClient(username=username, password=password, service="daisy_staff")
 
     yield client
 
@@ -128,9 +126,7 @@ async def async_daisy_client(credentials):
 
     username, password = credentials
 
-    client = AsyncDaisyClient(
-        username=username, password=password, service="daisy_staff"
-    )
+    client = AsyncDaisyClient(username=username, password=password, service="daisy_staff")
 
     async with client:
         yield client

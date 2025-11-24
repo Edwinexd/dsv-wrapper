@@ -2,7 +2,6 @@
 
 from datetime import date, datetime, time
 from enum import Enum
-from typing import Optional
 
 from pydantic import BaseModel, Field
 
@@ -25,8 +24,8 @@ class QueueEntry(BaseModel):
     position: int
     status: QueueStatus = QueueStatus.WAITING
     timestamp: datetime
-    room: Optional[str] = None
-    note: Optional[str] = None
+    room: str | None = None
+    note: str | None = None
 
     model_config = {"frozen": True}
 
@@ -40,9 +39,9 @@ class HandledningSession(BaseModel):
     date: date
     start_time: time
     end_time: time
-    room: Optional[str] = None
+    room: str | None = None
     queue: list[QueueEntry] = Field(default_factory=list)
-    max_students: Optional[int] = None
+    max_students: int | None = None
     is_active: bool = False
 
     model_config = {"frozen": True}

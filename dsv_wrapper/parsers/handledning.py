@@ -53,7 +53,7 @@ def parse_teacher_sessions(html: str, default_username: str) -> list[Handledning
             start_time = parse_time(time_match.group(1))
             end_time = parse_time(time_match.group(2))
         except ValueError as e:
-            raise ParseError(f"Failed to parse time from session: {e}")
+            raise ParseError(f"Failed to parse time from session: {e}") from e
 
         # Extract teacher info
         teacher_text = extract_text(teacher_elem) if teacher_elem else default_username
@@ -123,7 +123,7 @@ def parse_queue(html: str) -> list[QueueEntry]:
                     queue_time = parse_time(time_match.group(1))
                     timestamp = datetime.combine(date.today(), queue_time)
                 except ValueError as e:
-                    raise ParseError(f"Failed to parse timestamp from queue entry: {e}")
+                    raise ParseError(f"Failed to parse timestamp from queue entry: {e}") from e
 
         # Parse status
         status = QueueStatus.WAITING

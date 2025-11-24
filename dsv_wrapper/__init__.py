@@ -3,14 +3,29 @@
 __version__ = "0.1.0"
 
 # Main clients
-from .client import AsyncDSVClient, DSVClient
 from .actlab import ACTLabClient, AsyncACTLabClient
-from .daisy import AsyncDaisyClient, DaisyClient
-from .handledning import AsyncHandledningClient, HandledningClient
 
 # Authentication
 from .auth import AsyncShibbolethAuth, ServiceType, ShibbolethAuth
 from .auth.cache_backend import CacheBackend, FileCache, MemoryCache, NullCache
+from .client import AsyncDSVClient, DSVClient
+from .daisy import AsyncDaisyClient, DaisyClient
+
+# Exceptions
+from .exceptions import (
+    AuthenticationError,
+    BookingError,
+    DSVWrapperError,
+    HandledningError,
+    InvalidTimeSlotError,
+    NetworkError,
+    ParseError,
+    QueueError,
+    RoomNotAvailableError,
+    SessionExpiredError,
+    ValidationError,
+)
+from .handledning import AsyncHandledningClient, HandledningClient
 
 # Models
 from .models import (
@@ -32,21 +47,6 @@ from .models import (
     Staff,
     Student,
     Teacher,
-)
-
-# Exceptions
-from .exceptions import (
-    AuthenticationError,
-    BookingError,
-    DSVWrapperError,
-    HandledningError,
-    InvalidTimeSlotError,
-    NetworkError,
-    ParseError,
-    QueueError,
-    RoomNotAvailableError,
-    SessionExpiredError,
-    ValidationError,
 )
 
 # Utilities

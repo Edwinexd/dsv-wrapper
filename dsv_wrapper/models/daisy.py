@@ -1,8 +1,8 @@
 """Pydantic models for Daisy system."""
 
-from datetime import date, datetime, time
+from collections.abc import Callable
+from datetime import datetime
 from enum import Enum
-from typing import Callable, Optional
 
 from pydantic import BaseModel, Field
 
@@ -411,14 +411,14 @@ class Staff(BaseModel):
 
     person_id: str
     name: str
-    email: Optional[str] = None
-    room: Optional[str] = None
-    location: Optional[str] = None
-    profile_url: Optional[str] = None
-    profile_pic_url: Optional[str] = None
+    email: str | None = None
+    room: str | None = None
+    location: str | None = None
+    profile_url: str | None = None
+    profile_pic_url: str | None = None
     units: list[str] = Field(default_factory=list)
-    swedish_title: Optional[str] = None
-    english_title: Optional[str] = None
-    phone: Optional[str] = None
+    swedish_title: str | None = None
+    english_title: str | None = None
+    phone: str | None = None
 
     model_config = {"frozen": True}

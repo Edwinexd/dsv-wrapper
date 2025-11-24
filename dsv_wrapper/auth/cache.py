@@ -4,7 +4,6 @@ import json
 import pickle
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional
 
 from requests.cookies import RequestsCookieJar
 
@@ -14,7 +13,7 @@ class CookieCache:
 
     def __init__(
         self,
-        cache_dir: Optional[Path] = None,
+        cache_dir: Path | None = None,
         ttl_hours: int = 24,
         use_pickle: bool = False,
     ):
@@ -45,7 +44,7 @@ class CookieCache:
         ext = ".pkl" if self.use_pickle else ".json"
         return self.cache_dir / f"{key}{ext}"
 
-    def get(self, key: str) -> Optional[RequestsCookieJar]:
+    def get(self, key: str) -> RequestsCookieJar | None:
         """Get cookies from cache.
 
         Args:

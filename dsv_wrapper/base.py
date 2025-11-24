@@ -1,7 +1,5 @@
 """Base classes for DSV wrapper clients."""
 
-from typing import Optional
-
 import aiohttp
 
 from .auth import AsyncShibbolethAuth
@@ -18,7 +16,7 @@ class BaseAsyncClient:
         password: str,
         base_url: str,
         service: str,
-        cache_backend: Optional[CacheBackend] = None,
+        cache_backend: CacheBackend | None = None,
         cache_ttl: int = 86400,
     ):
         """Initialize base async client.
@@ -36,8 +34,10 @@ class BaseAsyncClient:
         self.base_url = base_url
         self.service = service
 
-        self.auth = AsyncShibbolethAuth(username, password, cache_backend=cache_backend, cache_ttl=cache_ttl)
-        self.session: Optional[aiohttp.ClientSession] = None
+        self.auth = AsyncShibbolethAuth(
+            username, password, cache_backend=cache_backend, cache_ttl=cache_ttl
+        )
+        self.session: aiohttp.ClientSession | None = None
         self._authenticated = False
 
     async def __aenter__(self):
@@ -57,11 +57,12 @@ class BaseAsyncClient:
         """Ensure the client is authenticated."""
         if not self._authenticated:
             # Get cookies from sync auth (runs in thread pool)
-            cookies_dict = await self.auth.login(self.service)
+            await self.auth.login(self.service)
 
             # Transfer cookies from sync session to async session
             # We need to create SimpleCookie objects with proper domain/path
-            from http.cookies import SimpleCookie, Morsel
+            from http.cookies import Morsel, SimpleCookie
+
             from yarl import URL
 
             for name, value in self.auth._sync_auth._client.cookies.items():
@@ -69,8 +70,8 @@ class BaseAsyncClient:
                 simple_cookie = SimpleCookie()
                 morsel = Morsel()
                 morsel.set(name, value, value)
-                morsel['domain'] = ''
-                morsel['path'] = '/'
+                morsel["domain"] = ""
+                morsel["path"] = "/"
                 simple_cookie[name] = morsel
 
                 # Update the cookie jar with a URL that matches the domain

@@ -35,6 +35,7 @@ def test_shibboleth_auth_with_cache(credentials, tmp_path):
 
     # Create cache in temporary directory
     from dsv_wrapper import FileCache
+
     cache = FileCache(cache_dir=tmp_path, default_ttl=3600)
 
     auth = ShibbolethAuth(username=username, password=password, cache_backend=cache)
@@ -59,7 +60,9 @@ def test_shibboleth_auth_with_cache(credentials, tmp_path):
 @pytest.mark.integration
 def test_shibboleth_auth_invalid_credentials():
     """Test authentication with invalid credentials."""
-    auth = ShibbolethAuth(username="invalid_user", password="wrong_password", cache_backend=NullCache())
+    auth = ShibbolethAuth(
+        username="invalid_user", password="wrong_password", cache_backend=NullCache()
+    )
 
     with pytest.raises((AuthenticationError, Exception)):
         auth._login(service="daisy_staff")
@@ -100,6 +103,7 @@ def test_shibboleth_auth_handledning(credentials):
 def test_cookie_cache_operations(tmp_path):
     """Test cookie cache operations."""
     from requests.cookies import RequestsCookieJar
+
     from dsv_wrapper import FileCache
 
     cache = FileCache(cache_dir=tmp_path, default_ttl=3600)
@@ -126,6 +130,7 @@ def test_cookie_cache_operations(tmp_path):
 def test_cookie_cache_expiry(tmp_path):
     """Test cookie cache expiry."""
     from requests.cookies import RequestsCookieJar
+
     from dsv_wrapper import FileCache
 
     # Create cache with very short TTL (1 second)

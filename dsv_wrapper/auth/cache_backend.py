@@ -5,7 +5,6 @@ import logging
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional
 
 from requests.cookies import RequestsCookieJar
 
@@ -19,7 +18,7 @@ class CacheBackend(ABC):
     """
 
     @abstractmethod
-    def get(self, key: str) -> Optional[RequestsCookieJar]:
+    def get(self, key: str) -> RequestsCookieJar | None:
         """Get cached cookies by key.
 
         Args:
@@ -31,7 +30,7 @@ class CacheBackend(ABC):
         pass
 
     @abstractmethod
-    def set(self, key: str, cookies: RequestsCookieJar, ttl: Optional[int] = None) -> None:
+    def set(self, key: str, cookies: RequestsCookieJar, ttl: int | None = None) -> None:
         """Set cached cookies with optional TTL.
 
         Args:
@@ -62,10 +61,10 @@ class NullCache(CacheBackend):
     Use this when you don't want any caching.
     """
 
-    def get(self, key: str) -> Optional[RequestsCookieJar]:
+    def get(self, key: str) -> RequestsCookieJar | None:
         return None
 
-    def set(self, key: str, cookies: RequestsCookieJar, ttl: Optional[int] = None) -> None:
+    def set(self, key: str, cookies: RequestsCookieJar, ttl: int | None = None) -> None:
         pass
 
     def delete(self, key: str) -> None:
@@ -90,7 +89,7 @@ class MemoryCache(CacheBackend):
         self.default_ttl = default_ttl
         self._cache: dict[str, tuple[RequestsCookieJar, datetime]] = {}
 
-    def get(self, key: str) -> Optional[RequestsCookieJar]:
+    def get(self, key: str) -> RequestsCookieJar | None:
         if key not in self._cache:
             return None
 
@@ -104,7 +103,7 @@ class MemoryCache(CacheBackend):
         logger.debug(f"Cache hit for key: {key}")
         return cookies
 
-    def set(self, key: str, cookies: RequestsCookieJar, ttl: Optional[int] = None) -> None:
+    def set(self, key: str, cookies: RequestsCookieJar, ttl: int | None = None) -> None:
         ttl = ttl if ttl is not None else self.default_ttl
         expires_at = datetime.now() + timedelta(seconds=ttl)
         self._cache[key] = (cookies, expires_at)
@@ -144,14 +143,14 @@ class FileCache(CacheBackend):
         safe_key = key.replace("/", "_").replace("\\", "_")
         return self.cache_dir / f"{safe_key}.json"
 
-    def get(self, key: str) -> Optional[RequestsCookieJar]:
+    def get(self, key: str) -> RequestsCookieJar | None:
         cache_path = self._get_cache_path(key)
 
         if not cache_path.exists():
             return None
 
         try:
-            with open(cache_path, "r") as f:
+            with open(cache_path) as f:
                 data = json.load(f)
 
             # Check if expired
@@ -179,7 +178,7 @@ class FileCache(CacheBackend):
             cache_path.unlink(missing_ok=True)
             return None
 
-    def set(self, key: str, cookies, ttl: Optional[int] = None) -> None:
+    def set(self, key: str, cookies, ttl: int | None = None) -> None:
         ttl = ttl if ttl is not None else self.default_ttl
         expires_at = datetime.now() + timedelta(seconds=ttl)
 

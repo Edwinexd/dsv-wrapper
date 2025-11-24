@@ -2,13 +2,10 @@
 
 import inspect
 import logging
-from datetime import date
 
 import pytest
 
 from dsv_wrapper.daisy import AsyncDaisyClient, DaisyClient
-from dsv_wrapper.models import RoomCategory
-from dsv_wrapper.exceptions import BookingError, RoomNotAvailableError
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +55,7 @@ def test_sync_async_api_parity():
 
     # Check that async client has all the public methods from sync client
     missing_in_async = set(sync_methods.keys()) - set(async_methods.keys())
-    extra_in_async = set(async_methods.keys()) - set(sync_methods.keys())
+    set(async_methods.keys()) - set(sync_methods.keys())
 
     # Filter out context manager methods which are intentionally different
     missing_in_async = {m for m in missing_in_async if m not in {"__enter__", "__exit__", "close"}}
@@ -124,9 +121,7 @@ async def test_async_daisy_get_staff_details(async_daisy_client):
     from dsv_wrapper.models import InstitutionID
 
     # First search for staff
-    staff_list = await async_daisy_client.search_staff(
-        institution_id=InstitutionID.DSV
-    )
+    staff_list = await async_daisy_client.search_staff(institution_id=InstitutionID.DSV)
 
     if staff_list:
         # Get details for the first staff member

@@ -2,17 +2,14 @@
 
 import logging
 import os
-import re
 from pathlib import Path
-from typing import Optional
 
 import httpx
 
 from .auth import AsyncShibbolethAuth, ShibbolethAuth
 from .auth.cache_backend import CacheBackend
-from .exceptions import AuthenticationError, DSVWrapperError
-from .models.actlab import Show, Slide, SlideUploadResult
-from .utils import DEFAULT_HEADERS
+from .exceptions import AuthenticationError
+from .models.actlab import Slide, SlideUploadResult
 from .parsers.actlab import (
     SlideUploadError,
     find_newest_slide_id,
@@ -20,6 +17,7 @@ from .parsers.actlab import (
     parse_slides,
     parse_upload_form,
 )
+from .utils import DEFAULT_HEADERS
 
 logger = logging.getLogger(__name__)
 
@@ -31,9 +29,9 @@ class ACTLabClient:
 
     def __init__(
         self,
-        username: Optional[str] = None,
-        password: Optional[str] = None,
-        cache_backend: Optional[CacheBackend] = None,
+        username: str | None = None,
+        password: str | None = None,
+        cache_backend: CacheBackend | None = None,
         cache_ttl: int = 86400,
     ):
         """Initialize ACT Lab client.
@@ -57,7 +55,9 @@ class ACTLabClient:
                 "via SU_USERNAME and SU_PASSWORD environment variables"
             )
 
-        self.auth = ShibbolethAuth(self.username, self.password, cache_backend=cache_backend, cache_ttl=cache_ttl)
+        self.auth = ShibbolethAuth(
+            self.username, self.password, cache_backend=cache_backend, cache_ttl=cache_ttl
+        )
         self._client = httpx.Client(headers=DEFAULT_HEADERS)
         self._authenticated = False
 
@@ -101,7 +101,9 @@ class ACTLabClient:
         response = self._client.get(ACTLAB_BASE_URL)
         response.raise_for_status()
 
-        form_action_url, action_value, max_file_size = parse_upload_form(response.text, ACTLAB_BASE_URL)
+        form_action_url, action_value, max_file_size = parse_upload_form(
+            response.text, ACTLAB_BASE_URL
+        )
 
         # Prepare upload data
         files = {"uploadfile": (file_path.name, open(file_path, "rb"), "image/png")}
@@ -170,7 +172,9 @@ class ACTLabClient:
         logger.debug(f"Slide {slide_id} configured successfully")
         return True
 
-    def add_slide_to_show(self, slide_id: str, show_id: str = "1", auto_delete: bool = True) -> bool:
+    def add_slide_to_show(
+        self, slide_id: str, show_id: str = "1", auto_delete: bool = True
+    ) -> bool:
         """Add a slide to a show.
 
         Args:
@@ -296,9 +300,9 @@ class AsyncACTLabClient:
 
     def __init__(
         self,
-        username: Optional[str] = None,
-        password: Optional[str] = None,
-        cache_backend: Optional[CacheBackend] = None,
+        username: str | None = None,
+        password: str | None = None,
+        cache_backend: CacheBackend | None = None,
         cache_ttl: int = 86400,
     ):
         """Initialize async ACT Lab client.
@@ -322,8 +326,10 @@ class AsyncACTLabClient:
                 "via SU_USERNAME and SU_PASSWORD environment variables"
             )
 
-        self.auth = AsyncShibbolethAuth(self.username, self.password, cache_backend=cache_backend, cache_ttl=cache_ttl)
-        self._client: Optional[httpx.AsyncClient] = None
+        self.auth = AsyncShibbolethAuth(
+            self.username, self.password, cache_backend=cache_backend, cache_ttl=cache_ttl
+        )
+        self._client: httpx.AsyncClient | None = None
         self._authenticated = False
 
         logger.debug(f"Initialized AsyncACTLabClient for user: {self.username}")
@@ -344,14 +350,11 @@ class AsyncACTLabClient:
         """Ensure the client is authenticated."""
         if not self._authenticated:
             logger.info("Authenticating to ACT Lab admin")
-            cookies = await self.auth.login(service="actlab")
+            await self.auth.login(service="actlab")
             # Copy cookies from auth client to this client (preserve domain/path)
             for cookie in self.auth._sync_auth._client.cookies.jar:
                 self._client.cookies.set(
-                    cookie.name,
-                    cookie.value,
-                    domain=cookie.domain,
-                    path=cookie.path
+                    cookie.name, cookie.value, domain=cookie.domain, path=cookie.path
                 )
             self._authenticated = True
             logger.info("Successfully authenticated to ACT Lab")
@@ -414,7 +417,9 @@ class AsyncACTLabClient:
         logger.debug(f"Slide {slide_id} configured successfully")
         return True
 
-    async def add_slide_to_show(self, slide_id: str, show_id: str = "1", auto_delete: bool = True) -> bool:
+    async def add_slide_to_show(
+        self, slide_id: str, show_id: str = "1", auto_delete: bool = True
+    ) -> bool:
         """Add a slide to a show.
 
         Args:
@@ -497,7 +502,9 @@ class AsyncACTLabClient:
         response = await self._client.get(ACTLAB_BASE_URL)
         response.raise_for_status()
 
-        form_action_url, action_value, max_file_size = parse_upload_form(response.text, ACTLAB_BASE_URL)
+        form_action_url, action_value, max_file_size = parse_upload_form(
+            response.text, ACTLAB_BASE_URL
+        )
 
         # Prepare upload data
         files = {"uploadfile": (file_path.name, open(file_path, "rb"), "image/png")}
@@ -509,7 +516,9 @@ class AsyncACTLabClient:
 
         # Upload the file to the form's action URL
         logger.debug(f"Uploading file to {form_action_url} with MAX_FILE_SIZE={max_file_size}")
-        response = await self._client.post(form_action_url, files=files, data=data, follow_redirects=True)
+        response = await self._client.post(
+            form_action_url, files=files, data=data, follow_redirects=True
+        )
         response.raise_for_status()
 
         # Get the new slide ID by fetching the page again and finding the max ID

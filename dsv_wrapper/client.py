@@ -1,7 +1,6 @@
 """Unified client for all DSV systems."""
 
 import os
-from typing import Optional
 
 from .actlab import ACTLabClient, AsyncACTLabClient
 from .auth.cache_backend import CacheBackend
@@ -15,10 +14,10 @@ class DSVClient:
 
     def __init__(
         self,
-        username: Optional[str] = None,
-        password: Optional[str] = None,
+        username: str | None = None,
+        password: str | None = None,
         daisy_service: str = "daisy_staff",
-        cache_backend: Optional[CacheBackend] = None,
+        cache_backend: CacheBackend | None = None,
         cache_ttl: int = 86400,
     ):
         """Initialize DSV unified client.
@@ -47,9 +46,9 @@ class DSVClient:
         self.cache_ttl = cache_ttl
 
         # Initialize clients
-        self._daisy: Optional[DaisyClient] = None
-        self._handledning: Optional[HandledningClient] = None
-        self._actlab: Optional[ACTLabClient] = None
+        self._daisy: DaisyClient | None = None
+        self._handledning: HandledningClient | None = None
+        self._actlab: ACTLabClient | None = None
         self.daisy_service = daisy_service
 
     @property
@@ -125,10 +124,10 @@ class AsyncDSVClient:
 
     def __init__(
         self,
-        username: Optional[str] = None,
-        password: Optional[str] = None,
+        username: str | None = None,
+        password: str | None = None,
         daisy_service: str = "daisy_staff",
-        cache_backend: Optional[CacheBackend] = None,
+        cache_backend: CacheBackend | None = None,
         cache_ttl: int = 86400,
     ):
         """Initialize async DSV unified client.
@@ -157,9 +156,9 @@ class AsyncDSVClient:
         self.cache_ttl = cache_ttl
 
         # Initialize clients
-        self._daisy: Optional[AsyncDaisyClient] = None
-        self._handledning: Optional[AsyncHandledningClient] = None
-        self._actlab: Optional[AsyncACTLabClient] = None
+        self._daisy: AsyncDaisyClient | None = None
+        self._handledning: AsyncHandledningClient | None = None
+        self._actlab: AsyncACTLabClient | None = None
         self.daisy_service = daisy_service
 
     async def __aenter__(self):

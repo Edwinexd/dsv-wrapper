@@ -1,7 +1,6 @@
 """Example: Using Handledning client synchronously."""
 
 from dsv_wrapper import HandledningClient
-from dsv_wrapper.models import QueueStatus
 
 # Initialize the Handledning client
 USERNAME = "your_username"

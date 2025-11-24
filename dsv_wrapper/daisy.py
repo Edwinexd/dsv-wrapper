@@ -3,25 +3,33 @@
 import logging
 import os
 import re
-from datetime import date, datetime, time
-from typing import Optional
-from urllib.parse import urlparse
+from datetime import date, time
 
 import httpx
 
 from .auth import AsyncShibbolethAuth, ShibbolethAuth
-from .auth.cache_backend import CacheBackend, NullCache
-from .exceptions import AuthenticationError, BookingError, NetworkError, ParseError, RoomNotAvailableError
-from .models import BookingSlot, InstitutionID, Room, RoomActivity, RoomCategory, RoomTime, Schedule, Staff, Student
+from .auth.cache_backend import CacheBackend
+from .exceptions import (
+    AuthenticationError,
+    BookingError,
+    NetworkError,
+    RoomNotAvailableError,
+)
+from .models import (
+    InstitutionID,
+    RoomActivity,
+    RoomCategory,
+    Schedule,
+    Staff,
+    Student,
+)
 from .parsers import daisy as daisy_parsers
 from .utils import (
     DEFAULT_HEADERS,
     DSV_URLS,
     build_url,
-    extract_attr,
     extract_text,
     parse_html,
-    parse_time,
 )
 
 logger = logging.getLogger(__name__)
@@ -32,10 +40,10 @@ class DaisyClient:
 
     def __init__(
         self,
-        username: Optional[str] = None,
-        password: Optional[str] = None,
+        username: str | None = None,
+        password: str | None = None,
         service: str = "daisy_staff",
-        cache_backend: Optional[CacheBackend] = None,
+        cache_backend: CacheBackend | None = None,
         cache_ttl: int = 86400,
     ):
         """Initialize Daisy client.
@@ -61,27 +69,24 @@ class DaisyClient:
             )
         self.service = service
         self.base_url = DSV_URLS[service]
-        self.auth = ShibbolethAuth(self.username, self.password, cache_backend=cache_backend, cache_ttl=cache_ttl)
+        self.auth = ShibbolethAuth(
+            self.username, self.password, cache_backend=cache_backend, cache_ttl=cache_ttl
+        )
         self._client = httpx.Client(headers=DEFAULT_HEADERS, follow_redirects=True)
         self._authenticated = False
 
     def _ensure_authenticated(self) -> None:
         """Ensure the client is authenticated."""
         if not self._authenticated:
-            cookies = self.auth._login(self.service)
+            self.auth._login(self.service)
             # Copy cookies from auth client to this client
             for cookie in self.auth._client.cookies.jar:
                 self._client.cookies.set(
-                    cookie.name,
-                    cookie.value,
-                    domain=cookie.domain,
-                    path=cookie.path
+                    cookie.name, cookie.value, domain=cookie.domain, path=cookie.path
                 )
             self._authenticated = True
 
-    def get_schedule(
-        self, category: RoomCategory, schedule_date: Optional[date] = None
-    ) -> Schedule:
+    def get_schedule(self, category: RoomCategory, schedule_date: date | None = None) -> Schedule:
         """Get room schedule for a category and date.
 
         Args:
@@ -106,7 +111,7 @@ class DaisyClient:
             "year": schedule_date.year,
             "month": f"{schedule_date.month:02d}",
             "day": f"{schedule_date.day:02d}",
-            "datumSubmit": "Visa"
+            "datumSubmit": "Visa",
         }
 
         response = self._client.post(url, data=data)
@@ -120,7 +125,7 @@ class DaisyClient:
         schedule_date: date,
         start_time: time,
         end_time: time,
-        purpose: Optional[str] = None,
+        purpose: str | None = None,
     ) -> bool:
         """Book a room for a specific time slot.
 
@@ -193,7 +198,7 @@ class DaisyClient:
         return daisy_parsers.parse_students(response.text)
 
     def get_room_activities(
-        self, room_id: str, schedule_date: Optional[date] = None
+        self, room_id: str, schedule_date: date | None = None
     ) -> list[RoomActivity]:
         """Get all activities scheduled in a room.
 
@@ -249,7 +254,9 @@ class DaisyClient:
         logger.info(f"Searching for staff at institution {institution_id}")
 
         # Convert enum to value if needed
-        institution_value = institution_id.value if hasattr(institution_id, 'value') else institution_id
+        institution_value = (
+            institution_id.value if hasattr(institution_id, "value") else institution_id
+        )
 
         form_data = {
             "efternamn": last_name,
@@ -295,7 +302,7 @@ class DaisyClient:
         self,
         institution_id: str | InstitutionID = InstitutionID.DSV,
         batch_size: int = 10,
-        delay_between_batches: float = 0.5
+        delay_between_batches: float = 0.5,
     ) -> list[Staff]:
         """Get all staff members with complete details.
 
@@ -327,7 +334,7 @@ class DaisyClient:
                 detailed_staff.append(detailed)
 
                 if (i + 1) % 10 == 0:
-                    logger.info(f"Progress: {i+1}/{len(staff_list)}")
+                    logger.info(f"Progress: {i + 1}/{len(staff_list)}")
             except Exception as e:
                 logger.error(f"Error fetching details for {staff.name}: {e}")
                 raise
@@ -354,8 +361,8 @@ class DaisyClient:
             response = self._client.get(url, timeout=10)
             response.raise_for_status()
 
-            content_type = response.headers.get('Content-Type', '')
-            if 'image' not in content_type:
+            content_type = response.headers.get("Content-Type", "")
+            if "image" not in content_type:
                 raise ValueError(f"URL did not return an image (Content-Type: {content_type})")
 
             return response.content
@@ -377,16 +384,15 @@ class DaisyClient:
         self.close()
 
 
-
 class AsyncDaisyClient:
     """Asynchronous client for Daisy system."""
 
     def __init__(
         self,
-        username: Optional[str] = None,
-        password: Optional[str] = None,
+        username: str | None = None,
+        password: str | None = None,
         service: str = "daisy_staff",
-        cache_backend: Optional[CacheBackend] = None,
+        cache_backend: CacheBackend | None = None,
         cache_ttl: int = 86400,
     ):
         """Initialize async Daisy client.
@@ -413,8 +419,10 @@ class AsyncDaisyClient:
 
         self.service = service
         self.base_url = DSV_URLS[service]
-        self.auth = AsyncShibbolethAuth(self.username, self.password, cache_backend=cache_backend, cache_ttl=cache_ttl)
-        self._client: Optional[httpx.AsyncClient] = None
+        self.auth = AsyncShibbolethAuth(
+            self.username, self.password, cache_backend=cache_backend, cache_ttl=cache_ttl
+        )
+        self._client: httpx.AsyncClient | None = None
         self._authenticated = False
 
         logger.debug(f"Initialized AsyncDaisyClient for user: {self.username}")
@@ -435,20 +443,17 @@ class AsyncDaisyClient:
         """Ensure the client is authenticated."""
         if not self._authenticated:
             logger.info(f"Authenticating to {self.service}")
-            cookies = await self.auth.login(service=self.service)
+            await self.auth.login(service=self.service)
             # Copy cookies from auth client to this client (preserve domain/path)
             for cookie in self.auth._sync_auth._client.cookies.jar:
                 self._client.cookies.set(
-                    cookie.name,
-                    cookie.value,
-                    domain=cookie.domain,
-                    path=cookie.path
+                    cookie.name, cookie.value, domain=cookie.domain, path=cookie.path
                 )
             self._authenticated = True
             logger.info(f"Successfully authenticated to {self.service}")
 
     async def get_schedule(
-        self, category: RoomCategory, schedule_date: Optional[date] = None
+        self, category: RoomCategory, schedule_date: date | None = None
     ) -> Schedule:
         """Get room schedule for a category and date.
 
@@ -474,7 +479,7 @@ class AsyncDaisyClient:
             "year": schedule_date.year,
             "month": f"{schedule_date.month:02d}",
             "day": f"{schedule_date.day:02d}",
-            "datumSubmit": "Visa"
+            "datumSubmit": "Visa",
         }
 
         response = await self._client.post(url, data=data)
@@ -488,7 +493,7 @@ class AsyncDaisyClient:
         schedule_date: date,
         start_time: time,
         end_time: time,
-        purpose: Optional[str] = None,
+        purpose: str | None = None,
     ) -> bool:
         """Book a room for a specific time slot.
 
@@ -561,7 +566,7 @@ class AsyncDaisyClient:
         return daisy_parsers.parse_students(response.text)
 
     async def get_room_activities(
-        self, room_id: str, schedule_date: Optional[date] = None
+        self, room_id: str, schedule_date: date | None = None
     ) -> list[RoomActivity]:
         """Get all activities scheduled in a room.
 
@@ -617,7 +622,9 @@ class AsyncDaisyClient:
         logger.info(f"Searching for staff at institution {institution_id}")
 
         # Convert enum to value if needed
-        institution_value = institution_id.value if hasattr(institution_id, 'value') else institution_id
+        institution_value = (
+            institution_id.value if hasattr(institution_id, "value") else institution_id
+        )
 
         form_data = {
             "efternamn": last_name,
@@ -663,7 +670,7 @@ class AsyncDaisyClient:
         self,
         institution_id: str | InstitutionID = InstitutionID.DSV,
         batch_size: int = 10,
-        delay_between_batches: float = 0.5
+        delay_between_batches: float = 0.5,
     ) -> list[Staff]:
         """Get all staff members with complete details.
 
@@ -686,12 +693,15 @@ class AsyncDaisyClient:
 
         # Fetch details in batches
         for i in range(0, len(staff_list), batch_size):
-            batch = staff_list[i:i + batch_size]
-            logger.debug(f"Fetching batch {i//batch_size + 1}/{(len(staff_list) + batch_size - 1)//batch_size}")
+            batch = staff_list[i : i + batch_size]
+            batch_num = i // batch_size + 1
+            total_batches = (len(staff_list) + batch_size - 1) // batch_size
+            logger.debug(f"Fetching batch {batch_num}/{total_batches}")
 
             # Create tasks for this batch
             tasks = []
             for staff in batch:
+
                 async def fetch_details(s: Staff) -> Staff:
                     """Fetch staff details."""
                     try:
@@ -732,12 +742,11 @@ class AsyncDaisyClient:
             response = await self._client.get(url, timeout=10)
             response.raise_for_status()
 
-            content_type = response.headers.get('Content-Type', '')
-            if 'image' not in content_type:
+            content_type = response.headers.get("Content-Type", "")
+            if "image" not in content_type:
                 raise ValueError(f"URL did not return an image (Content-Type: {content_type})")
 
             return response.content
 
         except httpx.HTTPError as e:
             raise NetworkError(f"Failed to download profile picture: {e}") from e
-

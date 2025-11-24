@@ -1,7 +1,6 @@
 """Utility functions for dsv-wrapper package."""
 
 from datetime import date, datetime, time
-from typing import Optional
 
 from bs4 import BeautifulSoup
 
@@ -177,13 +176,14 @@ def extract_text(element, default: str = "") -> str:
     if element is None:
         return default
     import re
+
     # Get text, strip leading/trailing whitespace, and normalize internal whitespace
     text = element.get_text(strip=True)
     # Replace multiple whitespace chars (including newlines) with single space
-    return re.sub(r'\s+', ' ', text)
+    return re.sub(r"\s+", " ", text)
 
 
-def extract_attr(element, attr: str, default: Optional[str] = None) -> Optional[str]:
+def extract_attr(element, attr: str, default: str | None = None) -> str | None:
     """Extract attribute from BeautifulSoup element.
 
     Args:

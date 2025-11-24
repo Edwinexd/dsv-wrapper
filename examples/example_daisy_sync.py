@@ -1,6 +1,6 @@
 """Example: Using Daisy client synchronously."""
 
-from datetime import date, time
+from datetime import date
 
 from dsv_wrapper import DaisyClient, RoomCategory
 
@@ -24,7 +24,9 @@ with DaisyClient(username=USERNAME, password=PASSWORD, service="daisy_staff") as
         print(f"\n  {room_name}")
         if activities:
             for activity in activities[:5]:  # Show first 5 activities
-                print(f"    {activity.time_slot_start.to_string()} - {activity.time_slot_end.to_string()}: {activity.event}")
+                start = activity.time_slot_start.to_string()
+                end = activity.time_slot_end.to_string()
+                print(f"    {start} - {end}: {activity.event}")
         else:
             print("    No activities")
 

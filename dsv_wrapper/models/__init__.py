@@ -12,6 +12,8 @@ Or from the main models module (backward compatible):
 """
 
 # Common models
+# ACT Lab models
+from .actlab import Show, Slide, SlideUploadResult
 from .common import Course, Student, Teacher
 
 # Daisy models
@@ -32,9 +34,6 @@ from .daisy import (
 
 # Handledning models
 from .handledning import HandledningSession, QueueEntry, QueueStatus
-
-# ACT Lab models
-from .actlab import Show, Slide, SlideUploadResult
 
 __all__ = [
     # Common models
