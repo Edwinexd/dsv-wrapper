@@ -64,14 +64,14 @@ class BaseAsyncClient:
             from http.cookies import SimpleCookie, Morsel
             from yarl import URL
 
-            for cookie in self.auth._sync_auth.session.cookies:
+            for name, value in self.auth._sync_auth.client.cookies.items():
                 # Create a SimpleCookie with this cookie
                 simple_cookie = SimpleCookie()
                 morsel = Morsel()
-                morsel.set(cookie.name, cookie.value, cookie.value)
-                morsel['domain'] = cookie.domain if cookie.domain else ''
-                morsel['path'] = cookie.path if cookie.path else '/'
-                simple_cookie[cookie.name] = morsel
+                morsel.set(name, value, value)
+                morsel['domain'] = ''
+                morsel['path'] = '/'
+                simple_cookie[name] = morsel
 
                 # Update the cookie jar with a URL that matches the domain
                 url = URL(self.base_url)

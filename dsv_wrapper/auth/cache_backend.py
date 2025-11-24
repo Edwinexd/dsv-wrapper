@@ -179,20 +179,32 @@ class FileCache(CacheBackend):
             cache_path.unlink(missing_ok=True)
             return None
 
-    def set(self, key: str, cookies: RequestsCookieJar, ttl: Optional[int] = None) -> None:
+    def set(self, key: str, cookies, ttl: Optional[int] = None) -> None:
         ttl = ttl if ttl is not None else self.default_ttl
         expires_at = datetime.now() + timedelta(seconds=ttl)
 
-        # Serialize cookies
-        cookies_data = [
-            {
-                "name": cookie.name,
-                "value": cookie.value,
-                "domain": cookie.domain,
-                "path": cookie.path,
-            }
-            for cookie in cookies
-        ]
+        # Serialize cookies - handle both dict and RequestsCookieJar
+        if isinstance(cookies, dict):
+            cookies_data = [
+                {
+                    "name": name,
+                    "value": value,
+                    "domain": "",
+                    "path": "/",
+                }
+                for name, value in cookies.items()
+            ]
+        else:
+            # RequestsCookieJar or similar iterable of cookie objects
+            cookies_data = [
+                {
+                    "name": cookie.name,
+                    "value": cookie.value,
+                    "domain": cookie.domain,
+                    "path": cookie.path,
+                }
+                for cookie in cookies
+            ]
 
         data = {
             "expires_at": expires_at.isoformat(),

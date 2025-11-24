@@ -4,9 +4,7 @@ import logging
 import re
 from typing import Literal, Optional
 
-import aiohttp
-import requests
-from requests.cookies import RequestsCookieJar
+import httpx
 
 from ..exceptions import AuthenticationError, NetworkError
 from ..utils import DEFAULT_HEADERS, DSV_SSO_TARGETS, DSV_URLS, extract_attr, parse_html
@@ -39,13 +37,12 @@ class ShibbolethAuth:
         self.password = password
         self.cache_backend = cache_backend if cache_backend is not None else NullCache()
         self.cache_ttl = cache_ttl
-        self.session = requests.Session()
-        self.session.headers.update(DEFAULT_HEADERS)
+        self.client = httpx.Client(headers=DEFAULT_HEADERS, follow_redirects=False)
 
         logger.debug(f"Initialized ShibbolethAuth for user: {username}")
         logger.debug(f"Cache backend: {type(self.cache_backend).__name__}")
 
-    def _login(self, service: ServiceType = "daisy_staff", validate_cache: bool = True) -> RequestsCookieJar:
+    def _login(self, service: ServiceType = "daisy_staff", validate_cache: bool = True) -> httpx.Cookies:
         """Perform SSO login and get authenticated cookies (internal use only).
 
         Args:
@@ -66,7 +63,7 @@ class ShibbolethAuth:
         cached_cookies = self.cache_backend.get(cache_key)
         if cached_cookies is not None:
             logger.debug("Found cached cookies")
-            self.session.cookies.update(cached_cookies)
+            self.client.cookies.update(cached_cookies)
 
             # Validate cached cookies if requested
             if validate_cache:
@@ -77,7 +74,7 @@ class ShibbolethAuth:
                 else:
                     logger.warning("Cached cookies are invalid, re-authenticating")
                     self.cache_backend.delete(cache_key)
-                    self.session.cookies.clear()
+                    self.client.cookies.clear()
             else:
                 logger.info("Using cached authentication cookies (unvalidated)")
                 return cached_cookies
@@ -87,14 +84,15 @@ class ShibbolethAuth:
             logger.debug(f"Performing SSO login to {service}")
             cookies = self._perform_login(service)
 
-            # Cache the cookies
-            self.cache_backend.set(cache_key, cookies, ttl=self.cache_ttl)
+            # Cache the cookies - pass jar directly to preserve domain/path info
+            # Use jar instead of cookies to avoid CookieConflict with duplicate names
+            self.cache_backend.set(cache_key, self.client.cookies.jar, ttl=self.cache_ttl)
             logger.debug(f"Cached authentication cookies with key: {cache_key}")
 
             logger.info(f"Successfully authenticated to {service}")
             return cookies
 
-        except requests.RequestException as e:
+        except httpx.HTTPError as e:
             logger.error(f"Network error during authentication: {e}")
             raise NetworkError(f"Network error during authentication: {e}") from e
 
@@ -110,7 +108,7 @@ class ShibbolethAuth:
         try:
             # Make a lightweight test request based on service
             test_url = self._get_validation_url(service)
-            response = self.session.get(test_url, timeout=10, allow_redirects=False)
+            response = self.client.get(test_url, timeout=10)
 
             # If we get redirected to login, cookies are invalid
             if response.status_code in (301, 302, 303):
@@ -119,12 +117,18 @@ class ShibbolethAuth:
                     logger.debug("Validation failed: redirected to login")
                     return False
 
-            # Check if response looks like a login page
-            if "login" in response.text.lower()[:1000] and response.status_code == 200:
-                # Could be login page
-                if "<form" in response.text.lower()[:2000] and "password" in response.text.lower()[:2000]:
+            # Check if response looks like a login page (regardless of status code!)
+            html_lower = response.text.lower()
+            if "login" in html_lower[:1000]:
+                # Look for login form indicators
+                if "<form" in html_lower[:2000] and "password" in html_lower[:2000]:
                     logger.debug("Validation failed: got login page")
                     return False
+
+            # Check for authenticated indicators (logout, username, etc.)
+            if not self._is_authenticated(response.text):
+                logger.debug("Validation failed: no authentication indicators found")
+                return False
 
             logger.debug("Validation passed")
             return True
@@ -152,7 +156,7 @@ class ShibbolethAuth:
         else:
             raise ValueError(f"Unknown service type: {service}")
 
-    def _perform_login(self, service: ServiceType) -> RequestsCookieJar:
+    def _perform_login(self, service: ServiceType) -> httpx.Cookies:
         """Perform the actual SSO login flow.
 
         Args:
@@ -170,7 +174,16 @@ class ShibbolethAuth:
 
         # Step 1: Request the service URL to get redirected to Shibboleth
         logger.debug("Step 1: Requesting service URL to initiate SSO")
-        response = self.session.get(service_url, allow_redirects=True)
+        response = self.client.get(service_url)
+        # Manually follow redirects
+        while response.status_code in (301, 302, 303):
+            location = response.headers["Location"]
+            # Make relative URLs absolute
+            if location.startswith("/"):
+                # Use the current response URL's base
+                base_url = f"{response.url.scheme}://{response.url.host}"
+                location = base_url + location
+            response = self.client.get(location)
 
         # Step 2: Handle intermediate localStorage form (if present)
         logger.debug("Step 2: Checking for intermediate localStorage form")
@@ -195,7 +208,16 @@ class ShibbolethAuth:
             # Submit the form (need full URL if action is relative)
             if form_action.startswith("/"):
                 form_action = "https://idp.it.su.se" + form_action
-            response = self.session.post(form_action, data=form_data)
+            response = self.client.post(form_action, data=form_data)
+
+            # Follow redirect if needed
+            while response.status_code in (301, 302, 303):
+                location = response.headers["Location"]
+                if location.startswith("/"):
+                    base_url = f"{response.url.scheme}://{response.url.host}"
+                    location = base_url + location
+                response = self.client.get(location)
+
             soup = parse_html(response.text)
 
         # Step 3: Parse the login form
@@ -205,59 +227,93 @@ class ShibbolethAuth:
         if login_form is None:
             login_form = soup.find("form")
             if login_form is None or "j_username" not in str(login_form):
-                # Already authenticated or no login required
-                logger.debug("No login form found, assuming already authenticated")
-                return self.session.cookies
+                # No login form - check if we're on a login/error page
+                logger.debug("No login form found, checking if on login page")
+                html_lower = response.text.lower()
+                # Check if this looks like a login or error page
+                if "log in" in html_lower[:1000] or "login" in html_lower[:500]:
+                    if "<form" in html_lower[:2000] and ("password" in html_lower[:2000] or "submit" in html_lower[:2000]):
+                        logger.error("Still on login page after authentication attempt")
+                        raise AuthenticationError("Authentication failed: Invalid credentials")
 
-        form_action = extract_attr(login_form, "action")
-        if form_action is None:
-            logger.error("Could not find login form action")
-            raise AuthenticationError("Could not find login form action")
+                # Not on login page, already past login - skip to SAML/validation
+                logger.debug("Not on login page, skipping to step 6 (SAML)")
+                # Skip steps 3-5, go directly to step 6
+                # (response already has the page we're on)
+        else:
+            # We have a login form, proceed with credential submission
+            form_action = extract_attr(login_form, "action")
+            if form_action is None:
+                logger.error("Could not find login form action")
+                raise AuthenticationError("Could not find login form action")
 
-        logger.debug(f"Login form action: {form_action}")
+            logger.debug(f"Login form action: {form_action}")
 
-        # Step 4: Submit credentials
-        logger.debug("Step 4: Submitting credentials")
+            # Step 4: Submit credentials
+            logger.debug("Step 4: Submitting credentials")
 
-        # Extract all form fields (including csrf_token, etc.)
-        login_data = {}
-        for input_field in login_form.find_all("input"):
-            name = extract_attr(input_field, "name")
-            value = extract_attr(input_field, "value")
-            if name:
-                login_data[name] = value or ""
+            # Extract all form fields (including csrf_token, etc.)
+            login_data = {}
+            for input_field in login_form.find_all("input"):
+                name = extract_attr(input_field, "name")
+                value = extract_attr(input_field, "value")
+                if name:
+                    login_data[name] = value or ""
 
-        # Update with username and password
-        login_data.update({
-            "j_username": self.username,
-            "j_password": self.password,
-            "_eventId_proceed": "",
-        })
+            # Update with username and password
+            login_data.update({
+                "j_username": self.username,
+                "j_password": self.password,
+                "_eventId_proceed": "",
+            })
 
-        # Remove SPNEGO-related fields (per old login.py)
-        login_data.pop("_eventId_authn/SPNEGO", None)
-        login_data.pop("_eventId_trySPNEGO", None)
+            # Remove SPNEGO-related fields (per old login.py)
+            login_data.pop("_eventId_authn/SPNEGO", None)
+            login_data.pop("_eventId_trySPNEGO", None)
 
-        # Build full URL if action is relative
-        if form_action.startswith("/"):
-            form_action = "https://idp.it.su.se" + form_action
+            # Build full URL if action is relative
+            if form_action.startswith("/"):
+                form_action = "https://idp.it.su.se" + form_action
 
-        response = self.session.post(form_action, data=login_data, allow_redirects=False)
-        logger.debug(f"Login response status: {response.status_code}")
+            response = self.client.post(form_action, data=login_data)
+            logger.debug(f"Login response status: {response.status_code}")
 
-        # Check if login failed
-        if response.status_code == 200:
-            soup = parse_html(response.text)
-            error = soup.find("p", class_="form-error")
-            if error:
-                error_msg = error.get_text(strip=True)
-                logger.error(f"Login failed: {error_msg}")
-                raise AuthenticationError(f"Login failed: {error_msg}")
+            # Check if login failed - either 200 with error or stayed on login page
+            if response.status_code == 200:
+                soup = parse_html(response.text)
+                error = soup.find("p", class_="form-error")
+                if error:
+                    error_msg = error.get_text(strip=True)
+                    logger.error(f"Login failed: {error_msg}")
+                    raise AuthenticationError(f"Login failed: {error_msg}")
 
-        # Step 5: Follow redirects if needed
-        if response.status_code in (301, 302, 303):
-            logger.debug(f"Step 5: Following redirect to {response.headers.get('Location')}")
-            response = self.session.get(response.headers["Location"], allow_redirects=True)
+                # Check if we're still on the login page (indicates auth failure)
+                login_form_check = soup.find("form", {"id": "login"})
+                if login_form_check:
+                    logger.error("Login failed: still on login page after credential submission")
+                    raise AuthenticationError("Authentication failed: Invalid credentials")
+
+            # Step 5: Follow redirects if needed
+            if response.status_code in (301, 302, 303):
+                logger.debug(f"Step 5: Following redirect to {response.headers.get('Location')}")
+                location = response.headers["Location"]
+                if location.startswith("/"):
+                    base_url = f"{response.url.scheme}://{response.url.host}"
+                    location = base_url + location
+                response = self.client.get(location)
+                while response.status_code in (301, 302, 303):
+                    location = response.headers["Location"]
+                    if location.startswith("/"):
+                        base_url = f"{response.url.scheme}://{response.url.host}"
+                        location = base_url + location
+                    response = self.client.get(location)
+
+                # After following redirects, check if we ended up back on login page
+                soup = parse_html(response.text)
+                login_form_check = soup.find("form", {"id": "login"})
+                if login_form_check:
+                    logger.error("Login failed: redirected back to login page after authentication")
+                    raise AuthenticationError("Authentication failed: Invalid credentials")
 
         # Step 6: Handle SAML response auto-submit form
         logger.debug("Step 6: Handling SAML response")
@@ -275,22 +331,30 @@ class ShibbolethAuth:
                 if name:
                     saml_data[name] = value or ""
 
-            response = self.session.post(saml_action, data=saml_data, allow_redirects=True)
+            response = self.client.post(saml_action, data=saml_data)
+            while response.status_code in (301, 302, 303):
+                location = response.headers["Location"]
+                if location.startswith("/"):
+                    base_url = f"{response.url.scheme}://{response.url.host}"
+                    location = base_url + location
+                response = self.client.get(location)
 
-        # Verify we're authenticated by checking cookies
+        # Verify we're authenticated by checking cookies AND validating them
         logger.debug("Verifying authentication by checking cookies")
         # Check for JSESSIONID or _shibsession cookies
         has_cookies = any(
-            cookie.name == "JSESSIONID" or cookie.name.startswith("_shibsession")
-            for cookie in self.session.cookies
+            name == "JSESSIONID" or name.startswith("_shibsession")
+            for name in self.client.cookies.keys()
         )
 
         if not has_cookies:
             logger.error("Authentication verification failed - no session cookies found")
             raise AuthenticationError("Authentication failed: No session cookies found")
 
+        # Note: We don't validate cookies here because validation can be unreliable
+        # (HTTP 200 doesn't mean success in Daisy). Let real requests fail naturally if auth didn't work.
         logger.debug("Authentication flow completed successfully")
-        return self.session.cookies
+        return self.client.cookies
 
     def _get_service_url(self, service: ServiceType) -> str:
         """Get the SSO target URL for a given service type.
@@ -319,17 +383,19 @@ class ShibbolethAuth:
         indicators = [
             "logout",
             "logga ut",
-            self.username.lower(),
             "profile",
             "profil",
         ]
+        # Add username if it's not None
+        if self.username:
+            indicators.append(self.username.lower())
 
         html_lower = html.lower()
         return any(indicator in html_lower for indicator in indicators)
 
     def logout(self) -> None:
         """Clear session and cached cookies."""
-        self.session.cookies.clear()
+        self.client.cookies.clear()
         self.cache_backend.clear()
 
     def __enter__(self):
@@ -338,7 +404,7 @@ class ShibbolethAuth:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         """Context manager exit."""
-        self.session.close()
+        self.client.close()
 
 
 class AsyncShibbolethAuth:
@@ -369,31 +435,27 @@ class AsyncShibbolethAuth:
 
         # Use sync auth internally
         self._sync_auth = ShibbolethAuth(username, password, cache_backend, cache_ttl)
-        self.session: Optional[aiohttp.ClientSession] = None
 
         logger.debug(f"Initialized AsyncShibbolethAuth for user: {username}")
         logger.debug(f"Cache backend: {type(self.cache_backend).__name__}")
 
     async def __aenter__(self):
         """Async context manager entry."""
-        self.session = aiohttp.ClientSession(headers=DEFAULT_HEADERS)
         self._sync_auth.__enter__()
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """Async context manager exit."""
-        if self.session:
-            await self.session.close()
         self._sync_auth.__exit__(exc_type, exc_val, exc_tb)
 
-    async def login(self, service: ServiceType = "daisy_staff") -> dict:
+    async def login(self, service: ServiceType = "daisy_staff") -> httpx.Cookies:
         """Perform async SSO login and get authenticated cookies.
 
         Args:
             service: Service to authenticate with (default: daisy_staff)
 
         Returns:
-            Authenticated cookies as dict
+            Authenticated cookies (httpx.Cookies)
 
         Raises:
             AuthenticationError: If authentication fails
@@ -401,14 +463,7 @@ class AsyncShibbolethAuth:
         """
         import asyncio
 
-        if self.session is None:
-            raise RuntimeError("Session not initialized. Use 'async with' context manager.")
-
         # Run sync login in thread pool to avoid blocking
-        cookies_jar = await asyncio.to_thread(self._sync_auth._login, service)
+        cookies = await asyncio.to_thread(self._sync_auth._login, service)
 
-        # Convert RequestsCookieJar to dict
-        return {cookie.name: cookie.value for cookie in cookies_jar}
-
-    # Note: We don't need async implementations of _perform_login, _get_service_url, or _is_authenticated
-    # since we're wrapping the sync version using asyncio.to_thread().
+        return cookies
