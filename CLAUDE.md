@@ -2,6 +2,7 @@
 
 - **29 of 29 pytest tests passing** - 100% pass rate!
 - **Major architecture refactor COMPLETE**: Fully migrated from requests/aiohttp to httpx
+- **Strict error handling implemented**: Silent failures replaced with explicit ParseError exceptions
 - All clients (ACTLab, Daisy, Handledning) now use unified httpx architecture
 - Sync and async clients have full API parity with automated tests to prevent de-sync
 - **All authentication and cookie issues resolved**
@@ -51,6 +52,20 @@
 - Eliminated all `__new__()` hacks and removed BaseAsyncClient dependency
 - All Handledning tests passing
 
+### Strict Error Handling (Complete)
+- **Replaced silent failures with explicit ParseError exceptions**
+- Parsing functions now raise ParseError instead of silently continuing on errors:
+  - Activity time slot parsing in Daisy schedules
+  - Activity time parsing in Daisy room activities
+  - Time parsing in Handledning sessions and queue entries
+- Added validation for HTML attributes (href, src) before use to prevent silent None bugs
+- Removed fallback behavior in `get_all_staff_details()` - now raises exceptions instead of returning partial data
+- **Benefits**:
+  - Parsing errors are immediately visible instead of silently skipped
+  - Makes debugging easier by failing fast on malformed HTML
+  - Ensures data integrity - no partial/incomplete results
+  - More predictable error handling for API consumers
+
 ## Important Notes
 
 - **HTTP 200 doesn't mean success in Daisy**: The service returns 200 status codes even for login pages and error pages. Always check the HTML content to verify successful responses.
@@ -67,6 +82,7 @@
 - ✅ Old unified client files removed (base_unified.py, shibboleth_unified.py, actlab_unified.py)
 - ✅ requirements.txt updated (removed requests and aiohttp dependencies)
 - ✅ All parsing functions extracted to dsv_wrapper/parsers/
+- ✅ Strict error handling implemented (merged from strict-error-handling branch)
 - ✅ **Critical bug fixes:**
   - Fixed async cookie transfer to preserve domain/path attributes
   - Fixed enum serialization in form data (InstitutionID conversion)
