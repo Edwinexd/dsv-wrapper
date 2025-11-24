@@ -195,8 +195,8 @@ class DaisyClient:
                                 event=event,
                             )
                         )
-                    except (ValueError, KeyError):
-                        continue
+                    except (ValueError, KeyError) as e:
+                        raise ParseError(f"Failed to parse activity time slot: {e}")
 
         # Extract metadata
         room_category_title = extract_text(rows[0].find_all("td")[1].find("b"))
@@ -406,8 +406,8 @@ class DaisyClient:
                         date=schedule_date,
                     )
                     activities.append(activity)
-                except ValueError:
-                    continue
+                except ValueError as e:
+                    raise ParseError(f"Failed to parse activity times: {e}")
 
         return activities
 
@@ -482,9 +482,10 @@ class DaisyClient:
                 if len(cols) >= 2:
                     profile_link = row.find("a", href=lambda x: x and "personID" in x)
                     if profile_link:
-                        person_id_match = re.search(
-                            r"personID=(\d+)", profile_link.get("href", "")
-                        )
+                        href = profile_link.get("href")
+                        if not href:
+                            raise ParseError("Profile link found but missing href attribute")
+                        person_id_match = re.search(r"personID=(\d+)", href)
                         if person_id_match:
                             person_id = person_id_match.group(1)
                             name = profile_link.get_text().strip()
@@ -492,7 +493,7 @@ class DaisyClient:
                             staff = Staff(
                                 person_id=person_id,
                                 name=name,
-                                profile_url=f"{base_url}{profile_link.get('href')}",
+                                profile_url=f"{base_url}{href}",
                             )
                             staff_list.append(staff)
 
@@ -537,7 +538,9 @@ class DaisyClient:
         profile_pic_url = None
         img_tag = soup.find("img", src=lambda x: x and "daisy.Jpg" in x)
         if img_tag:
-            pic_src = img_tag.get("src", "")
+            pic_src = img_tag.get("src")
+            if not pic_src:
+                raise ParseError("Profile image tag found but missing src attribute")
             if pic_src.startswith("/"):
                 parsed = urlparse(base_url)
                 profile_pic_url = f"{parsed.scheme}://{parsed.netloc}{pic_src}"
@@ -546,7 +549,10 @@ class DaisyClient:
         email = None
         email_link = soup.find("a", href=lambda x: x and "mailto:" in x)
         if email_link:
-            email = email_link.get("href", "").replace("mailto:", "")
+            href = email_link.get("href")
+            if not href:
+                raise ParseError("Email link found but missing href attribute")
+            email = href.replace("mailto:", "")
 
         # Extract name from page
         name = ""
@@ -643,8 +649,7 @@ class DaisyClient:
                     logger.info(f"Progress: {i+1}/{len(staff_list)}")
             except Exception as e:
                 logger.error(f"Error fetching details for {staff.name}: {e}")
-                # Add basic info if details fetch fails
-                detailed_staff.append(staff)
+                raise
 
         logger.info(f"Completed: {len(detailed_staff)} staff members with details")
         return detailed_staff
@@ -994,12 +999,12 @@ class AsyncDaisyClient(BaseAsyncClient):
         import asyncio
 
         async def fetch_with_fallback(staff: Staff) -> Staff:
-            """Fetch details with fallback to basic info on error."""
+            """Fetch staff details."""
             try:
                 return await self.get_staff_details(staff.person_id)
             except Exception as e:
                 logger.error(f"Error fetching details for {staff.name}: {e}")
-                return staff
+                raise
 
         detailed_staff = []
 

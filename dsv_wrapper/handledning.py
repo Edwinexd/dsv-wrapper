@@ -11,7 +11,7 @@ import requests
 from .auth import AsyncShibbolethAuth, ShibbolethAuth
 from .auth.cache_backend import CacheBackend
 from .base import BaseAsyncClient
-from .exceptions import AuthenticationError, HandledningError, QueueError
+from .exceptions import AuthenticationError, HandledningError, ParseError, QueueError
 from .models import (
     HandledningSession,
     QueueEntry,
@@ -141,8 +141,8 @@ class HandledningClient:
             try:
                 start_time = parse_time(time_match.group(1))
                 end_time = parse_time(time_match.group(2))
-            except ValueError:
-                continue
+            except ValueError as e:
+                raise ParseError(f"Failed to parse time from queue entry: {e}")
 
             # Extract teacher info
             teacher_text = extract_text(teacher_elem) if teacher_elem else self.username
@@ -227,8 +227,8 @@ class HandledningClient:
                     try:
                         queue_time = parse_time(time_match.group(1))
                         timestamp = datetime.combine(date.today(), queue_time)
-                    except ValueError:
-                        pass
+                    except ValueError as e:
+                        raise ParseError(f"Failed to parse timestamp from queue entry: {e}")
 
             # Parse status
             status = QueueStatus.WAITING
