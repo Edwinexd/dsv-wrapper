@@ -26,6 +26,7 @@
 - All clients use `httpx.Client` (sync) or `httpx.AsyncClient` (async)
 - **BaseAsyncClient completely removed** - all clients follow the new httpx pattern
 - All async clients use `__aenter__`/`__aexit__` context managers with httpx.AsyncClient
+- **httpx clients are private** - stored as `_client` (not `client`) to prevent external access to internal HTTP client
 
 ### Parsing Functions Pattern
 - Created `/dsv_wrapper/parsers/` module for shared parsing logic
@@ -45,6 +46,11 @@
 - Eliminated all `__new__()` hacks and removed BaseAsyncClient dependency
 - All Daisy tests passing
 - Cookie conflict issues resolved by using cookie jar directly
+- **Added `download_profile_picture(url)` method**: Proper wrapper method for downloading images
+  - Returns image bytes directly
+  - Raises `NetworkError` on HTTP failures
+  - Validates content type to ensure response is an image
+  - External code no longer needs to access internal httpx client
 
 ### HandledningClient Refactor (Complete)
 - Both `HandledningClient` and `AsyncHandledningClient` now use httpx
@@ -72,6 +78,8 @@
 - **Async auth implementation**: AsyncShibbolethAuth wraps the sync ShibbolethAuth using asyncio.to_thread() to avoid reimplementing the complex SAML flow. This ensures both versions work identically.
 - **httpx redirects**: httpx requires absolute URLs for redirects. The auth code now converts relative redirect URLs to absolute before following them.
 - **Cookie caching**: Cookies are now stored as dicts in the cache. FileCache backend updated to handle both dict and RequestsCookieJar formats.
+- **Private httpx clients**: All httpx clients are stored as `_client` (private) to enforce proper encapsulation and prevent external code from bypassing the API.
+- **Logging**: The library uses standard Python logging. **WARNING**: httpx logs at INFO level include session IDs in URLs - always set `logging.getLogger("httpx").setLevel(logging.WARNING)` in production to avoid exposing sensitive data.
 
 ## Completed Work
 
@@ -97,3 +105,4 @@
 - All ACTLab, Daisy, and Handledning tests pass with new httpx implementation
 - Cookie handling fixed: domain/path properly preserved in async clients
 - Enum serialization fixed: InstitutionID properly converted to value in form data
+- dont catch bare exception

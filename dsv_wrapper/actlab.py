@@ -58,7 +58,7 @@ class ACTLabClient:
             )
 
         self.auth = ShibbolethAuth(self.username, self.password, cache_backend=cache_backend, cache_ttl=cache_ttl)
-        self.client = httpx.Client(headers=DEFAULT_HEADERS)
+        self._client = httpx.Client(headers=DEFAULT_HEADERS)
         self._authenticated = False
 
         logger.debug(f"Initialized ACTLabClient for user: {self.username}")
@@ -68,7 +68,7 @@ class ACTLabClient:
         if not self._authenticated:
             logger.info("Authenticating to ACT Lab admin")
             cookies = self.auth._login(service="actlab")
-            self.client.cookies.update(cookies)
+            self._client.cookies.update(cookies)
             self._authenticated = True
             logger.info("Successfully authenticated to ACT Lab")
 
@@ -98,7 +98,7 @@ class ACTLabClient:
         logger.info(f"Uploading slide: {slide_name} from {file_path}")
 
         # Get the admin page to extract form action and MAX_FILE_SIZE
-        response = self.client.get(ACTLAB_BASE_URL)
+        response = self._client.get(ACTLAB_BASE_URL)
         response.raise_for_status()
 
         form_action_url, action_value, max_file_size = parse_upload_form(response.text, ACTLAB_BASE_URL)
@@ -113,11 +113,11 @@ class ACTLabClient:
 
         # Upload the file to the form's action URL
         logger.debug(f"Uploading file to {form_action_url} with MAX_FILE_SIZE={max_file_size}")
-        response = self.client.post(form_action_url, files=files, data=data, follow_redirects=True)
+        response = self._client.post(form_action_url, files=files, data=data, follow_redirects=True)
         response.raise_for_status()
 
         # Get the new slide ID by fetching the page again and finding the max ID
-        response = self.client.get(ACTLAB_BASE_URL)
+        response = self._client.get(ACTLAB_BASE_URL)
         response.raise_for_status()
 
         slide_id = find_newest_slide_id(response.text)
@@ -164,7 +164,7 @@ class ACTLabClient:
 
         # POST to action.php, not the base URL
         action_url = ACTLAB_BASE_URL.rstrip("/") + "/action.php"
-        response = self.client.post(action_url, data=data, follow_redirects=True)
+        response = self._client.post(action_url, data=data, follow_redirects=True)
         response.raise_for_status()
 
         logger.debug(f"Slide {slide_id} configured successfully")
@@ -189,7 +189,7 @@ class ACTLabClient:
 
         # POST to action.php, not the base URL
         action_url = ACTLAB_BASE_URL.rstrip("/") + "/action.php"
-        response = self.client.post(action_url, data=data, follow_redirects=True)
+        response = self._client.post(action_url, data=data, follow_redirects=True)
         response.raise_for_status()
 
         logger.info(f"Slide {slide_id} added to show {show_id}")
@@ -218,7 +218,7 @@ class ACTLabClient:
 
         # POST to action.php, not the base URL
         action_url = ACTLAB_BASE_URL.rstrip("/") + "/action.php"
-        response = self.client.post(action_url, data=data, follow_redirects=True)
+        response = self._client.post(action_url, data=data, follow_redirects=True)
         response.raise_for_status()
 
         logger.info(f"Slide {slide_id} removed from show {show_id}")
@@ -234,7 +234,7 @@ class ACTLabClient:
 
         logger.debug("Fetching slides list")
 
-        response = self.client.get(ACTLAB_BASE_URL)
+        response = self._client.get(ACTLAB_BASE_URL)
         response.raise_for_status()
 
         slides = parse_slides(response.text)
@@ -255,7 +255,7 @@ class ACTLabClient:
 
         logger.info(f"Cleaning up slides in show {show_id}, keeping latest {keep_latest}")
 
-        response = self.client.get(ACTLAB_BASE_URL)
+        response = self._client.get(ACTLAB_BASE_URL)
         response.raise_for_status()
 
         slide_ids = parse_show_slides(response.text, show_id)
@@ -279,7 +279,7 @@ class ACTLabClient:
 
     def close(self) -> None:
         """Close the client session."""
-        self.client.close()
+        self._client.close()
         self.auth.__exit__(None, None, None)
 
     def __enter__(self):
@@ -323,7 +323,7 @@ class AsyncACTLabClient:
             )
 
         self.auth = AsyncShibbolethAuth(self.username, self.password, cache_backend=cache_backend, cache_ttl=cache_ttl)
-        self.client: Optional[httpx.AsyncClient] = None
+        self._client: Optional[httpx.AsyncClient] = None
         self._authenticated = False
 
         logger.debug(f"Initialized AsyncACTLabClient for user: {self.username}")
@@ -331,13 +331,13 @@ class AsyncACTLabClient:
     async def __aenter__(self):
         """Async context manager entry."""
         await self.auth.__aenter__()
-        self.client = httpx.AsyncClient(headers=DEFAULT_HEADERS)
+        self._client = httpx.AsyncClient(headers=DEFAULT_HEADERS)
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """Async context manager exit."""
-        if self.client:
-            await self.client.aclose()
+        if self._client:
+            await self._client.aclose()
         await self.auth.__aexit__(exc_type, exc_val, exc_tb)
 
     async def _ensure_authenticated(self) -> None:
@@ -346,8 +346,8 @@ class AsyncACTLabClient:
             logger.info("Authenticating to ACT Lab admin")
             cookies = await self.auth.login(service="actlab")
             # Copy cookies from auth client to this client (preserve domain/path)
-            for cookie in self.auth._sync_auth.client.cookies.jar:
-                self.client.cookies.set(
+            for cookie in self.auth._sync_auth._client.cookies.jar:
+                self._client.cookies.set(
                     cookie.name,
                     cookie.value,
                     domain=cookie.domain,
@@ -366,7 +366,7 @@ class AsyncACTLabClient:
 
         logger.debug("Fetching slides list")
 
-        response = await self.client.get(ACTLAB_BASE_URL)
+        response = await self._client.get(ACTLAB_BASE_URL)
         response.raise_for_status()
 
         slides = parse_slides(response.text)
@@ -408,7 +408,7 @@ class AsyncACTLabClient:
 
         # POST to action.php, not the base URL
         action_url = ACTLAB_BASE_URL.rstrip("/") + "/action.php"
-        response = await self.client.post(action_url, data=data, follow_redirects=True)
+        response = await self._client.post(action_url, data=data, follow_redirects=True)
         response.raise_for_status()
 
         logger.debug(f"Slide {slide_id} configured successfully")
@@ -433,7 +433,7 @@ class AsyncACTLabClient:
 
         # POST to action.php, not the base URL
         action_url = ACTLAB_BASE_URL.rstrip("/") + "/action.php"
-        response = await self.client.post(action_url, data=data, follow_redirects=True)
+        response = await self._client.post(action_url, data=data, follow_redirects=True)
         response.raise_for_status()
 
         logger.info(f"Slide {slide_id} added to show {show_id}")
@@ -462,7 +462,7 @@ class AsyncACTLabClient:
 
         # POST to action.php, not the base URL
         action_url = ACTLAB_BASE_URL.rstrip("/") + "/action.php"
-        response = await self.client.post(action_url, data=data, follow_redirects=True)
+        response = await self._client.post(action_url, data=data, follow_redirects=True)
         response.raise_for_status()
 
         logger.info(f"Slide {slide_id} removed from show {show_id}")
@@ -494,7 +494,7 @@ class AsyncACTLabClient:
         logger.info(f"Uploading slide: {slide_name} from {file_path}")
 
         # Get the admin page to extract form action and MAX_FILE_SIZE
-        response = await self.client.get(ACTLAB_BASE_URL)
+        response = await self._client.get(ACTLAB_BASE_URL)
         response.raise_for_status()
 
         form_action_url, action_value, max_file_size = parse_upload_form(response.text, ACTLAB_BASE_URL)
@@ -509,11 +509,11 @@ class AsyncACTLabClient:
 
         # Upload the file to the form's action URL
         logger.debug(f"Uploading file to {form_action_url} with MAX_FILE_SIZE={max_file_size}")
-        response = await self.client.post(form_action_url, files=files, data=data, follow_redirects=True)
+        response = await self._client.post(form_action_url, files=files, data=data, follow_redirects=True)
         response.raise_for_status()
 
         # Get the new slide ID by fetching the page again and finding the max ID
-        response = await self.client.get(ACTLAB_BASE_URL)
+        response = await self._client.get(ACTLAB_BASE_URL)
         response.raise_for_status()
 
         slide_id = find_newest_slide_id(response.text)
@@ -539,7 +539,7 @@ class AsyncACTLabClient:
 
         logger.info(f"Cleaning up slides in show {show_id}, keeping latest {keep_latest}")
 
-        response = await self.client.get(ACTLAB_BASE_URL)
+        response = await self._client.get(ACTLAB_BASE_URL)
         response.raise_for_status()
 
         slide_ids = parse_show_slides(response.text, show_id)

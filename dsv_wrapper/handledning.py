@@ -64,7 +64,7 @@ class HandledningClient:
         self.mobile = mobile
         self.base_url = DSV_URLS["handledning_mobile" if mobile else "handledning_desktop"]
         self.auth = ShibbolethAuth(self.username, self.password, cache_backend=cache_backend, cache_ttl=cache_ttl)
-        self.client = httpx.Client(headers=DEFAULT_HEADERS, follow_redirects=True)
+        self._client = httpx.Client(headers=DEFAULT_HEADERS, follow_redirects=True)
         self._authenticated = False
 
     def _ensure_authenticated(self) -> None:
@@ -72,8 +72,8 @@ class HandledningClient:
         if not self._authenticated:
             cookies = self.auth._login("handledning")
             # Copy cookies from auth client to this client
-            for cookie in self.auth.client.cookies.jar:
-                self.client.cookies.set(
+            for cookie in self.auth._client.cookies.jar:
+                self._client.cookies.set(
                     cookie.name,
                     cookie.value,
                     domain=cookie.domain,
@@ -98,7 +98,7 @@ class HandledningClient:
             teacher_username = self.username
 
         url = build_url(self.base_url, "teacher", teacher_username)
-        response = self.client.get(url)
+        response = self._client.get(url)
         response.raise_for_status()
 
         return handledning_parsers.parse_teacher_sessions(response.text, self.username)
@@ -115,7 +115,7 @@ class HandledningClient:
         self._ensure_authenticated()
 
         url = build_url(self.base_url, "queue", session_id)
-        response = self.client.get(url)
+        response = self._client.get(url)
         response.raise_for_status()
 
         return handledning_parsers.parse_queue(response.text)
@@ -141,7 +141,7 @@ class HandledningClient:
         url = build_url(self.base_url, "queue", session_id, "add")
         data = {"student": student_username}
 
-        response = self.client.post(url, data=data)
+        response = self._client.post(url, data=data)
 
         if not response.is_success:
             raise QueueError(f"Failed to add to queue: {response.status_code}")
@@ -173,7 +173,7 @@ class HandledningClient:
         url = build_url(self.base_url, "queue", session_id, "remove")
         data = {"student": student_username}
 
-        response = self.client.post(url, data=data)
+        response = self._client.post(url, data=data)
 
         if not response.is_success:
             raise QueueError(f"Failed to remove from queue: {response.status_code}")
@@ -196,7 +196,7 @@ class HandledningClient:
 
         url = build_url(self.base_url, "session", session_id, "activate")
 
-        response = self.client.post(url)
+        response = self._client.post(url)
 
         if not response.is_success:
             raise HandledningError(f"Failed to activate session: {response.status_code}")
@@ -219,7 +219,7 @@ class HandledningClient:
 
         url = build_url(self.base_url, "session", session_id, "deactivate")
 
-        response = self.client.post(url)
+        response = self._client.post(url)
 
         if not response.is_success:
             raise HandledningError(f"Failed to deactivate session: {response.status_code}")
@@ -235,14 +235,14 @@ class HandledningClient:
         self._ensure_authenticated()
 
         url = build_url(self.base_url, "sessions", "active")
-        response = self.client.get(url)
+        response = self._client.get(url)
         response.raise_for_status()
 
         return handledning_parsers.parse_teacher_sessions(response.text, self.username)
 
     def close(self) -> None:
         """Close the client session."""
-        self.client.close()
+        self._client.close()
         self.auth.__exit__(None, None, None)
 
     def __enter__(self):
@@ -291,19 +291,19 @@ class AsyncHandledningClient:
         self.mobile = mobile
         self.base_url = DSV_URLS["handledning_mobile" if mobile else "handledning_desktop"]
         self.auth = AsyncShibbolethAuth(self.username, self.password, cache_backend=cache_backend, cache_ttl=cache_ttl)
-        self.client: Optional[httpx.AsyncClient] = None
+        self._client: Optional[httpx.AsyncClient] = None
         self._authenticated = False
 
     async def __aenter__(self):
         """Async context manager entry."""
         await self.auth.__aenter__()
-        self.client = httpx.AsyncClient(headers=DEFAULT_HEADERS)
+        self._client = httpx.AsyncClient(headers=DEFAULT_HEADERS)
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """Async context manager exit."""
-        if self.client:
-            await self.client.aclose()
+        if self._client:
+            await self._client.aclose()
         await self.auth.__aexit__(exc_type, exc_val, exc_tb)
 
     async def _ensure_authenticated(self) -> None:
@@ -311,8 +311,8 @@ class AsyncHandledningClient:
         if not self._authenticated:
             cookies = await self.auth.login(service="handledning")
             # Copy cookies from auth client to this client (preserve domain/path)
-            for cookie in self.auth._sync_auth.client.cookies.jar:
-                self.client.cookies.set(
+            for cookie in self.auth._sync_auth._client.cookies.jar:
+                self._client.cookies.set(
                     cookie.name,
                     cookie.value,
                     domain=cookie.domain,
@@ -337,7 +337,7 @@ class AsyncHandledningClient:
             teacher_username = self.username
 
         url = build_url(self.base_url, "teacher", teacher_username)
-        response = await self.client.get(url)
+        response = await self._client.get(url)
         response.raise_for_status()
 
         return handledning_parsers.parse_teacher_sessions(response.text, self.username)
@@ -354,7 +354,7 @@ class AsyncHandledningClient:
         await self._ensure_authenticated()
 
         url = build_url(self.base_url, "queue", session_id)
-        response = await self.client.get(url)
+        response = await self._client.get(url)
         response.raise_for_status()
 
         return handledning_parsers.parse_queue(response.text)
@@ -380,7 +380,7 @@ class AsyncHandledningClient:
         url = build_url(self.base_url, "queue", session_id, "add")
         data = {"student": student_username}
 
-        response = await self.client.post(url, data=data)
+        response = await self._client.post(url, data=data)
 
         if not response.is_success:
             raise QueueError(f"Failed to add to queue: {response.status_code}")
@@ -412,7 +412,7 @@ class AsyncHandledningClient:
         url = build_url(self.base_url, "queue", session_id, "remove")
         data = {"student": student_username}
 
-        response = await self.client.post(url, data=data)
+        response = await self._client.post(url, data=data)
 
         if not response.is_success:
             raise QueueError(f"Failed to remove from queue: {response.status_code}")
@@ -435,7 +435,7 @@ class AsyncHandledningClient:
 
         url = build_url(self.base_url, "session", session_id, "activate")
 
-        response = await self.client.post(url)
+        response = await self._client.post(url)
 
         if not response.is_success:
             raise HandledningError(f"Failed to activate session: {response.status_code}")
@@ -458,7 +458,7 @@ class AsyncHandledningClient:
 
         url = build_url(self.base_url, "session", session_id, "deactivate")
 
-        response = await self.client.post(url)
+        response = await self._client.post(url)
 
         if not response.is_success:
             raise HandledningError(f"Failed to deactivate session: {response.status_code}")
@@ -474,7 +474,7 @@ class AsyncHandledningClient:
         await self._ensure_authenticated()
 
         url = build_url(self.base_url, "sessions", "active")
-        response = await self.client.get(url)
+        response = await self._client.get(url)
         response.raise_for_status()
 
         return handledning_parsers.parse_teacher_sessions(response.text, self.username)

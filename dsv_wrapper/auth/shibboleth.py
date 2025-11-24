@@ -37,7 +37,7 @@ class ShibbolethAuth:
         self.password = password
         self.cache_backend = cache_backend if cache_backend is not None else NullCache()
         self.cache_ttl = cache_ttl
-        self.client = httpx.Client(headers=DEFAULT_HEADERS, follow_redirects=False)
+        self._client = httpx.Client(headers=DEFAULT_HEADERS, follow_redirects=False)
 
         logger.debug(f"Initialized ShibbolethAuth for user: {username}")
         logger.debug(f"Cache backend: {type(self.cache_backend).__name__}")
@@ -63,7 +63,7 @@ class ShibbolethAuth:
         cached_cookies = self.cache_backend.get(cache_key)
         if cached_cookies is not None:
             logger.debug("Found cached cookies")
-            self.client.cookies.update(cached_cookies)
+            self._client.cookies.update(cached_cookies)
 
             # Validate cached cookies if requested
             if validate_cache:
@@ -74,7 +74,7 @@ class ShibbolethAuth:
                 else:
                     logger.warning("Cached cookies are invalid, re-authenticating")
                     self.cache_backend.delete(cache_key)
-                    self.client.cookies.clear()
+                    self._client.cookies.clear()
             else:
                 logger.info("Using cached authentication cookies (unvalidated)")
                 return cached_cookies
@@ -86,7 +86,7 @@ class ShibbolethAuth:
 
             # Cache the cookies - pass jar directly to preserve domain/path info
             # Use jar instead of cookies to avoid CookieConflict with duplicate names
-            self.cache_backend.set(cache_key, self.client.cookies.jar, ttl=self.cache_ttl)
+            self.cache_backend.set(cache_key, self._client.cookies.jar, ttl=self.cache_ttl)
             logger.debug(f"Cached authentication cookies with key: {cache_key}")
 
             logger.info(f"Successfully authenticated to {service}")
@@ -108,7 +108,7 @@ class ShibbolethAuth:
         try:
             # Make a lightweight test request based on service
             test_url = self._get_validation_url(service)
-            response = self.client.get(test_url, timeout=10)
+            response = self._client.get(test_url, timeout=10)
 
             # If we get redirected to login, cookies are invalid
             if response.status_code in (301, 302, 303):
@@ -174,7 +174,7 @@ class ShibbolethAuth:
 
         # Step 1: Request the service URL to get redirected to Shibboleth
         logger.debug("Step 1: Requesting service URL to initiate SSO")
-        response = self.client.get(service_url)
+        response = self._client.get(service_url)
         # Manually follow redirects
         while response.status_code in (301, 302, 303):
             location = response.headers["Location"]
@@ -183,7 +183,7 @@ class ShibbolethAuth:
                 # Use the current response URL's base
                 base_url = f"{response.url.scheme}://{response.url.host}"
                 location = base_url + location
-            response = self.client.get(location)
+            response = self._client.get(location)
 
         # Step 2: Handle intermediate localStorage form (if present)
         logger.debug("Step 2: Checking for intermediate localStorage form")
@@ -208,7 +208,7 @@ class ShibbolethAuth:
             # Submit the form (need full URL if action is relative)
             if form_action.startswith("/"):
                 form_action = "https://idp.it.su.se" + form_action
-            response = self.client.post(form_action, data=form_data)
+            response = self._client.post(form_action, data=form_data)
 
             # Follow redirect if needed
             while response.status_code in (301, 302, 303):
@@ -216,7 +216,7 @@ class ShibbolethAuth:
                 if location.startswith("/"):
                     base_url = f"{response.url.scheme}://{response.url.host}"
                     location = base_url + location
-                response = self.client.get(location)
+                response = self._client.get(location)
 
             soup = parse_html(response.text)
 
@@ -275,7 +275,7 @@ class ShibbolethAuth:
             if form_action.startswith("/"):
                 form_action = "https://idp.it.su.se" + form_action
 
-            response = self.client.post(form_action, data=login_data)
+            response = self._client.post(form_action, data=login_data)
             logger.debug(f"Login response status: {response.status_code}")
 
             # Check if login failed - either 200 with error or stayed on login page
@@ -300,13 +300,13 @@ class ShibbolethAuth:
                 if location.startswith("/"):
                     base_url = f"{response.url.scheme}://{response.url.host}"
                     location = base_url + location
-                response = self.client.get(location)
+                response = self._client.get(location)
                 while response.status_code in (301, 302, 303):
                     location = response.headers["Location"]
                     if location.startswith("/"):
                         base_url = f"{response.url.scheme}://{response.url.host}"
                         location = base_url + location
-                    response = self.client.get(location)
+                    response = self._client.get(location)
 
                 # After following redirects, check if we ended up back on login page
                 soup = parse_html(response.text)
@@ -331,20 +331,20 @@ class ShibbolethAuth:
                 if name:
                     saml_data[name] = value or ""
 
-            response = self.client.post(saml_action, data=saml_data)
+            response = self._client.post(saml_action, data=saml_data)
             while response.status_code in (301, 302, 303):
                 location = response.headers["Location"]
                 if location.startswith("/"):
                     base_url = f"{response.url.scheme}://{response.url.host}"
                     location = base_url + location
-                response = self.client.get(location)
+                response = self._client.get(location)
 
         # Verify we're authenticated by checking cookies AND validating them
         logger.debug("Verifying authentication by checking cookies")
         # Check for JSESSIONID or _shibsession cookies
         has_cookies = any(
             name == "JSESSIONID" or name.startswith("_shibsession")
-            for name in self.client.cookies.keys()
+            for name in self._client.cookies.keys()
         )
 
         if not has_cookies:
@@ -354,7 +354,7 @@ class ShibbolethAuth:
         # Note: We don't validate cookies here because validation can be unreliable
         # (HTTP 200 doesn't mean success in Daisy). Let real requests fail naturally if auth didn't work.
         logger.debug("Authentication flow completed successfully")
-        return self.client.cookies
+        return self._client.cookies
 
     def _get_service_url(self, service: ServiceType) -> str:
         """Get the SSO target URL for a given service type.
@@ -395,7 +395,7 @@ class ShibbolethAuth:
 
     def logout(self) -> None:
         """Clear session and cached cookies."""
-        self.client.cookies.clear()
+        self._client.cookies.clear()
         self.cache_backend.clear()
 
     def __enter__(self):
@@ -404,7 +404,7 @@ class ShibbolethAuth:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         """Context manager exit."""
-        self.client.close()
+        self._client.close()
 
 
 class AsyncShibbolethAuth:

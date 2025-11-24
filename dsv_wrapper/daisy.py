@@ -11,7 +11,7 @@ import httpx
 
 from .auth import AsyncShibbolethAuth, ShibbolethAuth
 from .auth.cache_backend import CacheBackend, NullCache
-from .exceptions import AuthenticationError, BookingError, ParseError, RoomNotAvailableError
+from .exceptions import AuthenticationError, BookingError, NetworkError, ParseError, RoomNotAvailableError
 from .models import BookingSlot, InstitutionID, Room, RoomActivity, RoomCategory, RoomTime, Schedule, Staff, Student
 from .parsers import daisy as daisy_parsers
 from .utils import (
@@ -62,7 +62,7 @@ class DaisyClient:
         self.service = service
         self.base_url = DSV_URLS[service]
         self.auth = ShibbolethAuth(self.username, self.password, cache_backend=cache_backend, cache_ttl=cache_ttl)
-        self.client = httpx.Client(headers=DEFAULT_HEADERS, follow_redirects=True)
+        self._client = httpx.Client(headers=DEFAULT_HEADERS, follow_redirects=True)
         self._authenticated = False
 
     def _ensure_authenticated(self) -> None:
@@ -70,8 +70,8 @@ class DaisyClient:
         if not self._authenticated:
             cookies = self.auth._login(self.service)
             # Copy cookies from auth client to this client
-            for cookie in self.auth.client.cookies.jar:
-                self.client.cookies.set(
+            for cookie in self.auth._client.cookies.jar:
+                self._client.cookies.set(
                     cookie.name,
                     cookie.value,
                     domain=cookie.domain,
@@ -109,7 +109,7 @@ class DaisyClient:
             "datumSubmit": "Visa"
         }
 
-        response = self.client.post(url, data=data)
+        response = self._client.post(url, data=data)
         response.raise_for_status()
 
         return daisy_parsers.parse_schedule(response.text)
@@ -153,7 +153,7 @@ class DaisyClient:
         if purpose:
             data["purpose"] = purpose
 
-        response = self.client.post(booking_url, data=data)
+        response = self._client.post(booking_url, data=data)
 
         if response.status_code == 409:
             raise RoomNotAvailableError(f"Room {room_id} is not available for the requested time")
@@ -187,7 +187,7 @@ class DaisyClient:
         self._ensure_authenticated()
 
         url = build_url(self.base_url, "search", "students", q=query, limit=limit)
-        response = self.client.get(url)
+        response = self._client.get(url)
         response.raise_for_status()
 
         return daisy_parsers.parse_students(response.text)
@@ -217,7 +217,7 @@ class DaisyClient:
             date=schedule_date.isoformat(),
         )
 
-        response = self.client.get(url)
+        response = self._client.get(url)
         response.raise_for_status()
 
         return daisy_parsers.parse_activities(response.text, room_id, schedule_date)
@@ -265,7 +265,7 @@ class DaisyClient:
             "action:sokanstalld": "Sök",
         }
 
-        response = self.client.post(
+        response = self._client.post(
             f"{self.base_url}/sok/visaanstalld.jspa", data=form_data, timeout=30
         )
         response.raise_for_status()
@@ -286,7 +286,7 @@ class DaisyClient:
         logger.debug(f"Fetching details for staff {person_id}")
 
         url = f"{self.base_url}/anstalld/anstalldinfo.jspa?personID={person_id}"
-        response = self.client.get(url, timeout=10)
+        response = self._client.get(url, timeout=10)
         response.raise_for_status()
 
         return daisy_parsers.parse_staff_details(person_id, response.text, self.base_url)
@@ -335,9 +335,37 @@ class DaisyClient:
         logger.info(f"Completed: {len(detailed_staff)} staff members with details")
         return detailed_staff
 
+    def download_profile_picture(self, url: str) -> bytes:
+        """Download a profile picture from the given URL.
+
+        Args:
+            url: The URL of the profile picture
+
+        Returns:
+            Image bytes
+
+        Raises:
+            NetworkError: If the download fails
+            ValueError: If the response is not an image
+        """
+        self._ensure_authenticated()
+
+        try:
+            response = self._client.get(url, timeout=10)
+            response.raise_for_status()
+
+            content_type = response.headers.get('Content-Type', '')
+            if 'image' not in content_type:
+                raise ValueError(f"URL did not return an image (Content-Type: {content_type})")
+
+            return response.content
+
+        except httpx.HTTPError as e:
+            raise NetworkError(f"Failed to download profile picture: {e}") from e
+
     def close(self) -> None:
         """Close the client session."""
-        self.client.close()
+        self._client.close()
         self.auth.__exit__(None, None, None)
 
     def __enter__(self):
@@ -386,7 +414,7 @@ class AsyncDaisyClient:
         self.service = service
         self.base_url = DSV_URLS[service]
         self.auth = AsyncShibbolethAuth(self.username, self.password, cache_backend=cache_backend, cache_ttl=cache_ttl)
-        self.client: Optional[httpx.AsyncClient] = None
+        self._client: Optional[httpx.AsyncClient] = None
         self._authenticated = False
 
         logger.debug(f"Initialized AsyncDaisyClient for user: {self.username}")
@@ -394,13 +422,13 @@ class AsyncDaisyClient:
     async def __aenter__(self):
         """Async context manager entry."""
         await self.auth.__aenter__()
-        self.client = httpx.AsyncClient(headers=DEFAULT_HEADERS)
+        self._client = httpx.AsyncClient(headers=DEFAULT_HEADERS)
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """Async context manager exit."""
-        if self.client:
-            await self.client.aclose()
+        if self._client:
+            await self._client.aclose()
         await self.auth.__aexit__(exc_type, exc_val, exc_tb)
 
     async def _ensure_authenticated(self) -> None:
@@ -409,8 +437,8 @@ class AsyncDaisyClient:
             logger.info(f"Authenticating to {self.service}")
             cookies = await self.auth.login(service=self.service)
             # Copy cookies from auth client to this client (preserve domain/path)
-            for cookie in self.auth._sync_auth.client.cookies.jar:
-                self.client.cookies.set(
+            for cookie in self.auth._sync_auth._client.cookies.jar:
+                self._client.cookies.set(
                     cookie.name,
                     cookie.value,
                     domain=cookie.domain,
@@ -449,7 +477,7 @@ class AsyncDaisyClient:
             "datumSubmit": "Visa"
         }
 
-        response = await self.client.post(url, data=data)
+        response = await self._client.post(url, data=data)
         response.raise_for_status()
 
         return daisy_parsers.parse_schedule(response.text)
@@ -493,7 +521,7 @@ class AsyncDaisyClient:
         if purpose:
             data["purpose"] = purpose
 
-        response = await self.client.post(booking_url, data=data)
+        response = await self._client.post(booking_url, data=data)
 
         if response.status_code == 409:
             raise RoomNotAvailableError(f"Room {room_id} is not available for the requested time")
@@ -527,7 +555,7 @@ class AsyncDaisyClient:
         await self._ensure_authenticated()
 
         url = build_url(self.base_url, "search", "students", q=query, limit=limit)
-        response = await self.client.get(url)
+        response = await self._client.get(url)
         response.raise_for_status()
 
         return daisy_parsers.parse_students(response.text)
@@ -557,7 +585,7 @@ class AsyncDaisyClient:
             date=schedule_date.isoformat(),
         )
 
-        response = await self.client.get(url)
+        response = await self._client.get(url)
         response.raise_for_status()
 
         return daisy_parsers.parse_activities(response.text, room_id, schedule_date)
@@ -605,7 +633,7 @@ class AsyncDaisyClient:
             "action:sokanstalld": "Sök",
         }
 
-        response = await self.client.post(
+        response = await self._client.post(
             f"{self.base_url}/sok/visaanstalld.jspa", data=form_data, timeout=30
         )
         response.raise_for_status()
@@ -626,7 +654,7 @@ class AsyncDaisyClient:
         logger.debug(f"Fetching details for staff {person_id}")
 
         url = f"{self.base_url}/anstalld/anstalldinfo.jspa?personID={person_id}"
-        response = await self.client.get(url, timeout=10)
+        response = await self._client.get(url, timeout=10)
         response.raise_for_status()
 
         return daisy_parsers.parse_staff_details(person_id, response.text, self.base_url)
@@ -684,3 +712,32 @@ class AsyncDaisyClient:
 
         logger.info(f"Completed: {len(detailed_staff)} staff members with details")
         return detailed_staff
+
+    async def download_profile_picture(self, url: str) -> bytes:
+        """Download a profile picture from the given URL.
+
+        Args:
+            url: The URL of the profile picture
+
+        Returns:
+            Image bytes
+
+        Raises:
+            NetworkError: If the download fails
+            ValueError: If the response is not an image
+        """
+        await self._ensure_authenticated()
+
+        try:
+            response = await self._client.get(url, timeout=10)
+            response.raise_for_status()
+
+            content_type = response.headers.get('Content-Type', '')
+            if 'image' not in content_type:
+                raise ValueError(f"URL did not return an image (Content-Type: {content_type})")
+
+            return response.content
+
+        except httpx.HTTPError as e:
+            raise NetworkError(f"Failed to download profile picture: {e}") from e
+

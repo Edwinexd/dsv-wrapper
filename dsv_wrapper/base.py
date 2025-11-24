@@ -64,7 +64,7 @@ class BaseAsyncClient:
             from http.cookies import SimpleCookie, Morsel
             from yarl import URL
 
-            for name, value in self.auth._sync_auth.client.cookies.items():
+            for name, value in self.auth._sync_auth._client.cookies.items():
                 # Create a SimpleCookie with this cookie
                 simple_cookie = SimpleCookie()
                 morsel = Morsel()
