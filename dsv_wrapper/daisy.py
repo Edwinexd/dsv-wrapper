@@ -5,6 +5,7 @@ import os
 import re
 from datetime import date, datetime, time
 from typing import Optional
+from urllib.parse import urlparse
 
 import aiohttp
 import requests
@@ -538,7 +539,8 @@ class DaisyClient:
         if img_tag:
             pic_src = img_tag.get("src", "")
             if pic_src.startswith("/"):
-                profile_pic_url = f"{base_url.rsplit('/', 2)[0]}{pic_src}"
+                parsed = urlparse(base_url)
+                profile_pic_url = f"{parsed.scheme}://{parsed.netloc}{pic_src}"
 
         # Extract email
         email = None
