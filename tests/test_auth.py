@@ -34,21 +34,22 @@ def test_shibboleth_auth_with_cache(credentials, tmp_path):
     username, password = credentials
 
     # Create cache in temporary directory
-    cache = CookieCache(cache_dir=tmp_path, ttl_hours=1)
+    from dsv_wrapper import FileCache
+    cache = FileCache(cache_dir=tmp_path, default_ttl=3600)
 
-    auth = ShibbolethAuth(username=username, password=password, cache=cache, use_cache=True)
+    auth = ShibbolethAuth(username=username, password=password, cache_backend=cache)
 
     # First login (should hit the server)
-    cookies1 = auth.login(service="unified")
+    cookies1 = auth._login(service="unified")
     assert cookies1 is not None
 
     # Second login (should use cache)
-    cookies2 = auth.login(service="unified")
+    cookies2 = auth._login(service="unified")
     assert cookies2 is not None
 
     # Check cache was used
     cache_key = f"{username}_unified"
-    assert cache.is_valid(cache_key)
+    assert cache.get(cache_key) is not None
 
     logger.info("Cookie caching working correctly")
 

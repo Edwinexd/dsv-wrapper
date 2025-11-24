@@ -75,7 +75,7 @@ class ACTLabClient:
         """Ensure the client is authenticated."""
         if not self._authenticated:
             logger.info("Authenticating to ACT Lab admin")
-            cookies = self.auth.login(service="unified")
+            cookies = self.auth._login(service="unified")
             self.session.cookies.update(cookies)
             self._authenticated = True
             logger.info("Successfully authenticated to ACT Lab")
