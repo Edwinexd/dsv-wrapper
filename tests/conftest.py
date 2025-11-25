@@ -150,3 +150,45 @@ async def async_handledning_client(credentials):
 
     async with client:
         yield client
+
+
+@pytest.fixture
+def clickmap_client(credentials):
+    """Create a Clickmap client for testing.
+
+    Args:
+        credentials: Credentials fixture
+
+    Returns:
+        ClickmapClient: Initialized client
+    """
+    from dsv_wrapper import ClickmapClient
+
+    username, password = credentials
+
+    client = ClickmapClient(username=username, password=password)
+
+    yield client
+
+    # Cleanup
+    client.close()
+
+
+@pytest_asyncio.fixture
+async def async_clickmap_client(credentials):
+    """Create an async Clickmap client for testing.
+
+    Args:
+        credentials: Credentials fixture
+
+    Returns:
+        AsyncClickmapClient: Initialized client
+    """
+    from dsv_wrapper import AsyncClickmapClient
+
+    username, password = credentials
+
+    client = AsyncClickmapClient(username=username, password=password)
+
+    async with client:
+        yield client

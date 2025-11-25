@@ -8,6 +8,7 @@ from .actlab import ACTLabClient, AsyncACTLabClient
 # Authentication
 from .auth import AsyncShibbolethAuth, ServiceType, ShibbolethAuth
 from .auth.cache_backend import CacheBackend, FileCache, MemoryCache, NullCache
+from .clickmap import AsyncClickmapClient, ClickmapClient
 from .client import AsyncDSVClient, DSVClient
 from .daisy import AsyncDaisyClient, DaisyClient
 
@@ -34,6 +35,7 @@ from .models import (
     Course,
     HandledningSession,
     InstitutionID,
+    Placement,
     QueueEntry,
     QueueStatus,
     Room,
@@ -78,6 +80,8 @@ __all__ = [
     "AsyncHandledningClient",
     "ACTLabClient",
     "AsyncACTLabClient",
+    "ClickmapClient",
+    "AsyncClickmapClient",
     # Authentication
     "ShibbolethAuth",
     "AsyncShibbolethAuth",
@@ -105,6 +109,7 @@ __all__ = [
     "Slide",
     "Show",
     "SlideUploadResult",
+    "Placement",
     # Exceptions
     "DSVWrapperError",
     "AuthenticationError",

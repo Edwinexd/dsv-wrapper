@@ -1,14 +1,15 @@
 ## Project Status
 
-- **29 of 29 pytest tests passing** - 100% pass rate!
+- **36 of 36 pytest tests passing** - 100% pass rate!
 - **Major architecture refactor COMPLETE**: Fully migrated from requests/aiohttp to httpx
 - **Strict error handling implemented**: Silent failures replaced with explicit ParseError exceptions
-- All clients (ACTLab, Daisy, Handledning) now use unified httpx architecture
+- All clients (ACTLab, Daisy, Handledning, Clickmap) now use unified httpx architecture
 - Sync and async clients have full API parity with automated tests to prevent de-sync
 - **All authentication and cookie issues resolved**
 - ~50% code duplication eliminated through shared parsing functions
 - BaseAsyncClient removed - no longer needed
 - Disclaimer added to README regarding AI-generated code experiment
+- **NEW: Clickmap client added** - Extract DSV office/workspace placements
 
 ## Architecture Changes (2025-11-24)
 
@@ -58,6 +59,30 @@
 - Eliminated all `__new__()` hacks and removed BaseAsyncClient dependency
 - All Handledning tests passing
 
+### ClickmapClient (New - 2025-11-25)
+- **New client for clickmap.dsv.su.se** - DSV office/workspace placement map
+- Both `ClickmapClient` and `AsyncClickmapClient` implemented with httpx
+- **API endpoints**:
+  - `GET /api/points` - Returns all workspace placements with person info
+  - `GET /api/export` - Export all data as TSV (admin/export permissions required)
+- **Placement model** with fields:
+  - `id`: UUID
+  - `place_name`: Workspace/room identifier (e.g., "66109", "6:7")
+  - `person_name`: Name of person at this workspace
+  - `person_role`: Title/role of the person
+  - `latitude`, `longitude`: Map coordinates
+  - `comment`: Additional notes (requires export permission)
+  - `is_occupied`: Property to check if workspace has a person
+- **Client methods**:
+  - `get_placements()`: Get all workspace placements
+  - `search_placements(query)`: Search by person or place name
+  - `get_placement_by_person(name)`: Find by exact person name
+  - `get_placement_by_place(name)`: Find by exact place name
+  - `get_occupied_placements()`: Get only placements with people
+  - `get_vacant_placements()`: Get only empty placements
+- Uses JSON API (no HTML parsing required)
+- All 7 clickmap tests passing
+
 ### Strict Error Handling (Complete)
 - **Replaced silent failures with explicit ParseError exceptions**
 - Parsing functions now raise ParseError instead of silently continuing on errors:
@@ -86,6 +111,7 @@
 - ✅ ACTLab client migration to httpx
 - ✅ Daisy client migration to httpx
 - ✅ Handledning client migration to httpx
+- ✅ **Clickmap client added** (new service - 2025-11-25)
 - ✅ BaseAsyncClient removed
 - ✅ Old unified client files removed (base_unified.py, shibboleth_unified.py, actlab_unified.py)
 - ✅ requirements.txt updated (removed requests and aiohttp dependencies)
@@ -116,9 +142,10 @@
 
 ## Testing Notes
 
-- **Test coverage: 29/29 passing - 100%!**
+- **Test coverage: 36/36 passing - 100%!**
 - All authentication tests pass including invalid credentials detection
 - API parity tests verify sync/async clients have identical method signatures
-- All ACTLab, Daisy, and Handledning tests pass with new httpx implementation
+- All ACTLab, Daisy, Handledning, and Clickmap tests pass with httpx implementation
 - Cookie handling fixed: domain/path properly preserved in async clients
 - Enum serialization fixed: InstitutionID properly converted to value in form data
+- Clickmap tests include: placements retrieval, search, filtering, model validation, API parity

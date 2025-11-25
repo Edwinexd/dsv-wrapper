@@ -5,15 +5,19 @@ You can import from specific modules:
     from dsv_wrapper.models.daisy import RoomCategory, Room
     from dsv_wrapper.models.handledning import QueueStatus, QueueEntry
     from dsv_wrapper.models.actlab import Slide, Show
+    from dsv_wrapper.models.clickmap import Placement
     from dsv_wrapper.models.common import Student, Teacher
 
 Or from the main models module (backward compatible):
-    from dsv_wrapper.models import RoomCategory, Room, Student, Teacher, Slide
+    from dsv_wrapper.models import RoomCategory, Room, Student, Teacher, Slide, Placement
 """
 
 # Common models
 # ACT Lab models
 from .actlab import Show, Slide, SlideUploadResult
+
+# Clickmap models
+from .clickmap import Placement
 from .common import Course, Student, Teacher
 
 # Daisy models
@@ -61,4 +65,6 @@ __all__ = [
     "Slide",
     "Show",
     "SlideUploadResult",
+    # Clickmap models
+    "Placement",
 ]

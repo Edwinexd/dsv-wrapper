@@ -21,6 +21,7 @@ DSV_SSO_TARGETS = {
     "daisy_student": "https://daisy.dsv.su.se/login_sso_student.jspa",
     "handledning": "https://handledning.dsv.su.se",
     "actlab": "https://www2.dsv.su.se/act-lab/admin/",
+    "clickmap": "https://clickmap.dsv.su.se/api/login?return=/",
 }
 
 # DSV system base URLs - for making API requests
@@ -30,6 +31,7 @@ DSV_URLS = {
     "handledning_desktop": "https://handledning.dsv.su.se",
     "handledning_mobile": "https://handledning.dsv.su.se/mobile",
     "actlab": "https://www2.dsv.su.se/act-lab/admin/",
+    "clickmap": "https://clickmap.dsv.su.se",
     "shibboleth_login": "https://login.su.se/idp/profile/SAML2/Redirect/SSO",
 }
 
