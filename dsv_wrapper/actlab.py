@@ -67,10 +67,35 @@ class ACTLabClient:
         """Ensure the client is authenticated."""
         if not self._authenticated:
             logger.info("Authenticating to ACT Lab admin")
-            cookies = self.auth._login(service="actlab")
-            self._client.cookies.update(cookies)
+            self.auth._login(service="actlab")
+            # Copy cookies with domain/path preserved
+            for cookie in self.auth._client.cookies.jar:
+                self._client.cookies.set(
+                    cookie.name, cookie.value, domain=cookie.domain, path=cookie.path
+                )
             self._authenticated = True
             logger.info("Successfully authenticated to ACT Lab")
+
+    def _post_action(self, data: dict) -> httpx.Response:
+        """POST to action.php with proper redirect handling.
+
+        ACT Lab's action.php returns 302 with empty Location on success.
+        """
+        action_url = ACTLAB_BASE_URL.rstrip("/") + "/action.php"
+        response = self._client.post(action_url, data=data, follow_redirects=False)
+
+        if response.status_code in (301, 302, 303):
+            redirect_url = response.headers.get("Location", "")
+            if redirect_url:
+                if redirect_url.startswith("/"):
+                    redirect_url = "https://www2.dsv.su.se" + redirect_url
+                response = self._client.get(redirect_url)
+                response.raise_for_status()
+            # Empty redirect = success
+        elif not response.is_success:
+            response.raise_for_status()
+
+        return response
 
     def upload_slide(
         self,
@@ -115,8 +140,23 @@ class ACTLabClient:
 
         # Upload the file to the form's action URL
         logger.debug(f"Uploading file to {form_action_url} with MAX_FILE_SIZE={max_file_size}")
-        response = self._client.post(form_action_url, files=files, data=data, follow_redirects=True)
-        response.raise_for_status()
+        response = self._client.post(
+            form_action_url, files=files, data=data, follow_redirects=False
+        )
+
+        # Handle response - upload may redirect or return 302 with empty location
+        if response.status_code in (301, 302, 303):
+            redirect_url = response.headers.get("Location", "")
+            logger.debug(f"Upload response: {response.status_code}, redirect to: {redirect_url!r}")
+            # Follow the redirect if we have a URL
+            if redirect_url:
+                if redirect_url.startswith("/"):
+                    redirect_url = "https://www2.dsv.su.se" + redirect_url
+                response = self._client.get(redirect_url)
+                response.raise_for_status()
+            # Empty redirect location with 302 is treated as success (server quirk)
+        elif not response.is_success:
+            response.raise_for_status()
 
         # Get the new slide ID by fetching the page again and finding the max ID
         response = self._client.get(ACTLAB_BASE_URL)
@@ -164,11 +204,7 @@ class ACTLabClient:
         if auto_delete:
             data["autodelete"] = "on"
 
-        # POST to action.php, not the base URL
-        action_url = ACTLAB_BASE_URL.rstrip("/") + "/action.php"
-        response = self._client.post(action_url, data=data, follow_redirects=True)
-        response.raise_for_status()
-
+        self._post_action(data)
         logger.debug(f"Slide {slide_id} configured successfully")
         return True
 
@@ -190,11 +226,7 @@ class ACTLabClient:
         logger.info(f"Adding slide {slide_id} to show {show_id}")
 
         data = {"action": "add_slide_to_show", "add": slide_id, "to": show_id}
-
-        # POST to action.php, not the base URL
-        action_url = ACTLAB_BASE_URL.rstrip("/") + "/action.php"
-        response = self._client.post(action_url, data=data, follow_redirects=True)
-        response.raise_for_status()
+        self._post_action(data)
 
         logger.info(f"Slide {slide_id} added to show {show_id}")
 
@@ -219,11 +251,7 @@ class ACTLabClient:
         logger.info(f"Removing slide {slide_id} from show {show_id}")
 
         data = {"action": "remove", "remove": slide_id, "from": show_id}
-
-        # POST to action.php, not the base URL
-        action_url = ACTLAB_BASE_URL.rstrip("/") + "/action.php"
-        response = self._client.post(action_url, data=data, follow_redirects=True)
-        response.raise_for_status()
+        self._post_action(data)
 
         logger.info(f"Slide {slide_id} removed from show {show_id}")
         return True
@@ -359,6 +387,27 @@ class AsyncACTLabClient:
             self._authenticated = True
             logger.info("Successfully authenticated to ACT Lab")
 
+    async def _post_action(self, data: dict) -> httpx.Response:
+        """POST to action.php with proper redirect handling.
+
+        ACT Lab's action.php returns 302 with empty Location on success.
+        """
+        action_url = ACTLAB_BASE_URL.rstrip("/") + "/action.php"
+        response = await self._client.post(action_url, data=data, follow_redirects=False)
+
+        if response.status_code in (301, 302, 303):
+            redirect_url = response.headers.get("Location", "")
+            if redirect_url:
+                if redirect_url.startswith("/"):
+                    redirect_url = "https://www2.dsv.su.se" + redirect_url
+                response = await self._client.get(redirect_url)
+                response.raise_for_status()
+            # Empty redirect = success
+        elif not response.is_success:
+            response.raise_for_status()
+
+        return response
+
     async def get_slides(self) -> list[Slide]:
         """Get list of all available slides.
 
@@ -409,11 +458,7 @@ class AsyncACTLabClient:
         if auto_delete:
             data["autodelete"] = "on"
 
-        # POST to action.php, not the base URL
-        action_url = ACTLAB_BASE_URL.rstrip("/") + "/action.php"
-        response = await self._client.post(action_url, data=data, follow_redirects=True)
-        response.raise_for_status()
-
+        await self._post_action(data)
         logger.debug(f"Slide {slide_id} configured successfully")
         return True
 
@@ -435,11 +480,7 @@ class AsyncACTLabClient:
         logger.info(f"Adding slide {slide_id} to show {show_id}")
 
         data = {"action": "add_slide_to_show", "add": slide_id, "to": show_id}
-
-        # POST to action.php, not the base URL
-        action_url = ACTLAB_BASE_URL.rstrip("/") + "/action.php"
-        response = await self._client.post(action_url, data=data, follow_redirects=True)
-        response.raise_for_status()
+        await self._post_action(data)
 
         logger.info(f"Slide {slide_id} added to show {show_id}")
 
@@ -464,11 +505,7 @@ class AsyncACTLabClient:
         logger.info(f"Removing slide {slide_id} from show {show_id}")
 
         data = {"action": "remove", "remove": slide_id, "from": show_id}
-
-        # POST to action.php, not the base URL
-        action_url = ACTLAB_BASE_URL.rstrip("/") + "/action.php"
-        response = await self._client.post(action_url, data=data, follow_redirects=True)
-        response.raise_for_status()
+        await self._post_action(data)
 
         logger.info(f"Slide {slide_id} removed from show {show_id}")
         return True
@@ -517,9 +554,22 @@ class AsyncACTLabClient:
         # Upload the file to the form's action URL
         logger.debug(f"Uploading file to {form_action_url} with MAX_FILE_SIZE={max_file_size}")
         response = await self._client.post(
-            form_action_url, files=files, data=data, follow_redirects=True
+            form_action_url, files=files, data=data, follow_redirects=False
         )
-        response.raise_for_status()
+
+        # Handle response - upload may redirect or return 302 with empty location
+        if response.status_code in (301, 302, 303):
+            redirect_url = response.headers.get("Location", "")
+            logger.debug(f"Upload response: {response.status_code}, redirect to: {redirect_url!r}")
+            # Follow the redirect if we have a URL
+            if redirect_url:
+                if redirect_url.startswith("/"):
+                    redirect_url = "https://www2.dsv.su.se" + redirect_url
+                response = await self._client.get(redirect_url)
+                response.raise_for_status()
+            # Empty redirect location with 302 is treated as success (server quirk)
+        elif not response.is_success:
+            response.raise_for_status()
 
         # Get the new slide ID by fetching the page again and finding the max ID
         response = await self._client.get(ACTLAB_BASE_URL)
