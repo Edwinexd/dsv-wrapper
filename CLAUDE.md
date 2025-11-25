@@ -1,6 +1,6 @@
 ## Project Status
 
-- **36 of 36 pytest tests passing** - 100% pass rate!
+- **52 of 52 pytest tests passing** - 100% pass rate!
 - **Major architecture refactor COMPLETE**: Fully migrated from requests/aiohttp to httpx
 - **Strict error handling implemented**: Silent failures replaced with explicit ParseError exceptions
 - All clients (ACTLab, Daisy, Handledning, Clickmap) now use unified httpx architecture
@@ -10,6 +10,7 @@
 - BaseAsyncClient removed - no longer needed
 - Disclaimer added to README regarding AI-generated code experiment
 - **NEW: Clickmap client added** - Extract DSV office/workspace placements
+- **NEW: Mail client added** - Send and read emails via SU webmail (mail.su.se)
 
 ## Architecture Changes (2025-11-24)
 
@@ -83,6 +84,35 @@
 - Uses JSON API (no HTML parsing required)
 - All 7 clickmap tests passing
 
+### MailClient (New - 2025-11-25)
+- **New client for mail.su.se** - SU webmail via Outlook Web App (OWA) API
+- Both `MailClient` and `AsyncMailClient` implemented with httpx
+- **Authentication**: Complex SSO flow through ADFS + Shibboleth IDP
+- **API**: Uses OWA JSON API at ebox.su.se
+- **Client methods**:
+  - `get_folder(folder_name)`: Get folder info (inbox, drafts, sentitems, etc.)
+  - `get_emails(folder_name, limit)`: List emails in a folder (headers only, no body)
+  - `get_email(message_id, change_key, body_type)`: Get full email content including body
+  - `send_email(to, subject, body, body_type, cc, save_to_sent)`: Send email
+  - `delete_email(message_id, permanent)`: Delete email (move to trash or permanent)
+- **Models**:
+  - `MailFolder`: Folder with id, name, total_count, unread_count
+  - `EmailMessage`: Full email with subject, body, sender, recipients, dates, etc.
+  - `EmailAddress`: Email address with name
+  - `SendEmailResult`: Send operation result with success/error
+  - `BodyType` enum: TEXT or HTML
+  - `Importance` enum: LOW, NORMAL, HIGH
+- **Implementation details**:
+  - `get_folder` uses `GetFolder` API with `DistinguishedFolderId`
+  - `get_emails` requires two API calls: GetFolder (to get actual folder ID) + FindItem (with `Traversal: Shallow`)
+  - `get_email` uses `GetItem` with `AllProperties` shape
+  - `send_email` uses three-step process: CreateItem -> UpdateItem (add recipients) -> SendItem
+- **Known limitations**:
+  - The OWA JSON API is finicky about request formats - requires exact field structures
+  - FindFolder doesn't work (serialization errors)
+  - FindItem requires actual folder ID (not distinguished name) and `Traversal: Shallow`
+- **Undo Send note**: If "Undo Send" is enabled in OWA settings, sent emails appear in drafts for 30 seconds before being sent
+
 ### Strict Error Handling (Complete)
 - **Replaced silent failures with explicit ParseError exceptions**
 - Parsing functions now raise ParseError instead of silently continuing on errors:
@@ -112,6 +142,7 @@
 - ✅ Daisy client migration to httpx
 - ✅ Handledning client migration to httpx
 - ✅ **Clickmap client added** (new service - 2025-11-25)
+- ✅ **Mail client added** (new service - 2025-11-25) - Send and read emails via OWA API
 - ✅ BaseAsyncClient removed
 - ✅ Old unified client files removed (base_unified.py, shibboleth_unified.py, actlab_unified.py)
 - ✅ requirements.txt updated (removed requests and aiohttp dependencies)
@@ -142,10 +173,12 @@
 
 ## Testing Notes
 
-- **Test coverage: 36/36 passing - 100%!**
+- **Test coverage: 52/52 passing - 100%!**
 - All authentication tests pass including invalid credentials detection
 - API parity tests verify sync/async clients have identical method signatures
-- All ACTLab, Daisy, Handledning, and Clickmap tests pass with httpx implementation
+- All ACTLab, Daisy, Handledning, Clickmap, and Mail tests pass with httpx implementation
 - Cookie handling fixed: domain/path properly preserved in async clients
 - Enum serialization fixed: InstitutionID properly converted to value in form data
 - Clickmap tests include: placements retrieval, search, filtering, model validation, API parity
+- Mail tests include: folder info, email listing, full email retrieval, send to self, API parity
+- Mail send tests use `AUTOMATEDTESTSEND - {timestamp}` pattern for easy cleanup

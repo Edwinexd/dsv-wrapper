@@ -27,14 +27,20 @@ from .exceptions import (
     ValidationError,
 )
 from .handledning import AsyncHandledningClient, HandledningClient
+from .mail import AsyncMailClient, MailClient
 
 # Models
 from .models import (
     ActivityType,
+    BodyType,
     BookingSlot,
     Course,
+    EmailAddress,
+    EmailMessage,
     HandledningSession,
+    Importance,
     InstitutionID,
+    MailFolder,
     Placement,
     QueueEntry,
     QueueStatus,
@@ -43,6 +49,7 @@ from .models import (
     RoomCategory,
     RoomTime,
     Schedule,
+    SendEmailResult,
     Show,
     Slide,
     SlideUploadResult,
@@ -82,6 +89,8 @@ __all__ = [
     "AsyncACTLabClient",
     "ClickmapClient",
     "AsyncClickmapClient",
+    "MailClient",
+    "AsyncMailClient",
     # Authentication
     "ShibbolethAuth",
     "AsyncShibbolethAuth",
@@ -110,6 +119,12 @@ __all__ = [
     "Show",
     "SlideUploadResult",
     "Placement",
+    "BodyType",
+    "EmailAddress",
+    "EmailMessage",
+    "Importance",
+    "MailFolder",
+    "SendEmailResult",
     # Exceptions
     "DSVWrapperError",
     "AuthenticationError",

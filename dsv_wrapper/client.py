@@ -4,9 +4,11 @@ import os
 
 from .actlab import ACTLabClient, AsyncACTLabClient
 from .auth.cache_backend import CacheBackend
+from .clickmap import AsyncClickmapClient, ClickmapClient
 from .daisy import AsyncDaisyClient, DaisyClient
 from .exceptions import AuthenticationError
 from .handledning import AsyncHandledningClient, HandledningClient
+from .mail import AsyncMailClient, MailClient
 
 
 class DSVClient:
@@ -49,6 +51,8 @@ class DSVClient:
         self._daisy: DaisyClient | None = None
         self._handledning: HandledningClient | None = None
         self._actlab: ACTLabClient | None = None
+        self._clickmap: ClickmapClient | None = None
+        self._mail: MailClient | None = None
         self.daisy_service = daisy_service
 
     @property
@@ -101,6 +105,36 @@ class DSVClient:
             )
         return self._actlab
 
+    @property
+    def clickmap(self) -> ClickmapClient:
+        """Get Clickmap client (lazy initialization).
+
+        Returns:
+            ClickmapClient instance
+        """
+        if self._clickmap is None:
+            self._clickmap = ClickmapClient(
+                username=self.username,
+                password=self.password,
+                cache_backend=self.cache_backend,
+                cache_ttl=self.cache_ttl,
+            )
+        return self._clickmap
+
+    @property
+    def mail(self) -> MailClient:
+        """Get Mail client (lazy initialization).
+
+        Returns:
+            MailClient instance
+        """
+        if self._mail is None:
+            self._mail = MailClient(
+                username=self.username,
+                password=self.password,
+            )
+        return self._mail
+
     def close(self) -> None:
         """Close all client sessions."""
         if self._daisy is not None:
@@ -109,6 +143,10 @@ class DSVClient:
             self._handledning.close()
         if self._actlab is not None:
             self._actlab.close()
+        if self._clickmap is not None:
+            self._clickmap.close()
+        if self._mail is not None:
+            self._mail.close()
 
     def __enter__(self):
         """Context manager entry."""
@@ -159,6 +197,8 @@ class AsyncDSVClient:
         self._daisy: AsyncDaisyClient | None = None
         self._handledning: AsyncHandledningClient | None = None
         self._actlab: AsyncACTLabClient | None = None
+        self._clickmap: AsyncClickmapClient | None = None
+        self._mail: AsyncMailClient | None = None
         self.daisy_service = daisy_service
 
     async def __aenter__(self):
@@ -173,6 +213,10 @@ class AsyncDSVClient:
             await self._handledning.__aexit__(exc_type, exc_val, exc_tb)
         if self._actlab is not None:
             await self._actlab.__aexit__(exc_type, exc_val, exc_tb)
+        if self._clickmap is not None:
+            await self._clickmap.__aexit__(exc_type, exc_val, exc_tb)
+        if self._mail is not None:
+            await self._mail.__aexit__(exc_type, exc_val, exc_tb)
 
     async def get_daisy(self) -> AsyncDaisyClient:
         """Get async Daisy client (lazy initialization).
@@ -223,3 +267,33 @@ class AsyncDSVClient:
             )
             await self._actlab.__aenter__()
         return self._actlab
+
+    async def get_clickmap(self) -> AsyncClickmapClient:
+        """Get async Clickmap client (lazy initialization).
+
+        Returns:
+            AsyncClickmapClient instance
+        """
+        if self._clickmap is None:
+            self._clickmap = AsyncClickmapClient(
+                username=self.username,
+                password=self.password,
+                cache_backend=self.cache_backend,
+                cache_ttl=self.cache_ttl,
+            )
+            await self._clickmap.__aenter__()
+        return self._clickmap
+
+    async def get_mail(self) -> AsyncMailClient:
+        """Get async Mail client (lazy initialization).
+
+        Returns:
+            AsyncMailClient instance
+        """
+        if self._mail is None:
+            self._mail = AsyncMailClient(
+                username=self.username,
+                password=self.password,
+            )
+            await self._mail.__aenter__()
+        return self._mail

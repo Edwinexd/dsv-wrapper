@@ -11,8 +11,10 @@ For questions or concerns regarding this project, please contact: edwinsu@dsv.su
 ## Features
 
 - **Unified Authentication**: Shibboleth SSO login with cookie caching
-- **Daisy Integration**: Room booking, schedule retrieval, student search
+- **Daisy Integration**: Room booking, schedule retrieval, student/staff search
 - **Handledning Integration**: Lab supervision queue management
+- **Clickmap Integration**: DSV office/workspace placement lookup
+- **Mail Integration**: Send and read emails via SU webmail (mail.su.se)
 - **Sync & Async**: Both synchronous and asynchronous APIs
 - **Type Safe**: Pydantic models for all data structures
 - **Python 3.12+**: Modern Python with latest features
@@ -123,6 +125,60 @@ with HandledningClient(username="user", password="pass") as handledning:
     handledning.activate_session(session_id="session123")
 ```
 
+#### Mail Client
+
+```python
+from dsv_wrapper import MailClient, BodyType
+
+with MailClient(username="user", password="pass") as mail:
+    # Get inbox stats
+    inbox = mail.get_folder("inbox")
+    print(f"Inbox: {inbox.total_count} emails, {inbox.unread_count} unread")
+
+    # List recent emails (headers only, no body for efficiency)
+    emails = mail.get_emails("inbox", limit=10)
+    for email in emails:
+        sender = email.sender.email if email.sender else "Unknown"
+        print(f"{email.subject} - from {sender}")
+
+    # Get full email content including body
+    if emails:
+        full_email = mail.get_email(emails[0].id, emails[0].change_key)
+        print(f"Body: {full_email.body[:200]}...")
+
+    # Send an email
+    result = mail.send_email(
+        to="recipient@example.com",
+        subject="Hello from dsv-wrapper",
+        body="This is a test email.",
+        body_type=BodyType.TEXT,
+        cc=["cc@example.com"],  # Optional
+        save_to_sent=True,  # Save copy to sent items
+    )
+    if result.success:
+        print(f"Email sent! Message ID: {result.message_id}")
+    else:
+        print(f"Failed to send: {result.error}")
+```
+
+#### Clickmap Client
+
+```python
+from dsv_wrapper import ClickmapClient
+
+with ClickmapClient(username="user", password="pass") as clickmap:
+    # Get all workspace placements
+    placements = clickmap.get_placements()
+
+    # Search by person or place name
+    results = clickmap.search_placements("Karlsson")
+    for p in results:
+        print(f"{p.person_name} - Room {p.place_name}")
+
+    # Get only occupied workspaces
+    occupied = clickmap.get_occupied_placements()
+```
+
 ### Async Usage
 
 ```python
@@ -213,11 +269,17 @@ All data is represented using Pydantic models for type safety:
 
 ```python
 from dsv_wrapper.models import (
+    # Daisy models
     Room, RoomCategory, RoomTime, RoomRestriction,
     BookingSlot, RoomActivity, BookableRoom, Schedule, Break,
-    Student, Teacher, Course,
+    Student, Teacher, Course, Staff, ActivityType,
+    # Handledning models
     QueueEntry, QueueStatus, HandledningSession,
-    ActivityType
+    # Clickmap models
+    Placement,
+    # Mail models
+    MailFolder, EmailMessage, EmailAddress, SendEmailResult,
+    BodyType, Importance,
 )
 
 # Room enums with specific IDs
@@ -358,16 +420,30 @@ dsv-wrapper/
 │   ├── auth/                # Authentication module
 │   │   ├── __init__.py
 │   │   ├── shibboleth.py   # SSO login handlers
-│   │   └── cache.py         # Cookie caching
-│   ├── models.py            # Pydantic models
+│   │   └── cache_backend.py # Cookie caching
+│   ├── models/              # Pydantic models
+│   │   ├── __init__.py
+│   │   ├── daisy.py        # Daisy models
+│   │   ├── handledning.py  # Handledning models
+│   │   ├── clickmap.py     # Clickmap models
+│   │   ├── mail.py         # Mail models
+│   │   └── common.py       # Shared models
+│   ├── parsers/             # HTML/data parsing
+│   │   ├── actlab.py
+│   │   ├── daisy.py
+│   │   └── handledning.py
 │   ├── daisy.py             # Daisy client
 │   ├── handledning.py       # Handledning client
+│   ├── actlab.py            # ACT Lab client
+│   ├── clickmap.py          # Clickmap client
+│   ├── mail.py              # Mail client (OWA API)
 │   ├── client.py            # Unified client
 │   ├── utils.py             # Utilities
 │   └── exceptions.py        # Custom exceptions
-├── examples/                # Example scripts
+├── tests/                   # Test suite
 ├── pyproject.toml          # Project configuration
 ├── requirements.txt        # Dependencies
+├── CLAUDE.md               # AI development notes
 └── README.md               # This file
 ```
 

@@ -39,6 +39,16 @@ from .daisy import (
 # Handledning models
 from .handledning import HandledningSession, QueueEntry, QueueStatus
 
+# Mail models
+from .mail import (
+    BodyType,
+    EmailAddress,
+    EmailMessage,
+    Importance,
+    MailFolder,
+    SendEmailResult,
+)
+
 __all__ = [
     # Common models
     "Student",
@@ -67,4 +77,11 @@ __all__ = [
     "SlideUploadResult",
     # Clickmap models
     "Placement",
+    # Mail models
+    "BodyType",
+    "EmailAddress",
+    "EmailMessage",
+    "Importance",
+    "MailFolder",
+    "SendEmailResult",
 ]
