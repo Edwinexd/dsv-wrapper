@@ -13,6 +13,7 @@ from .exceptions import (
     AuthenticationError,
     BookingError,
     NetworkError,
+    ParseError,
     RoomNotAvailableError,
 )
 from .models import (
@@ -34,6 +35,9 @@ from .utils import (
 
 logger = logging.getLogger(__name__)
 
+# Default concurrency for bulk operations
+DEFAULT_MAX_CONCURRENT = 20
+
 
 class DaisyClient:
     """Synchronous client for Daisy system."""
@@ -45,6 +49,7 @@ class DaisyClient:
         service: str = "daisy_staff",
         cache_backend: CacheBackend | None = None,
         cache_ttl: int = 86400,
+        max_concurrent: int = DEFAULT_MAX_CONCURRENT,
     ):
         """Initialize Daisy client.
 
@@ -54,6 +59,7 @@ class DaisyClient:
             service: Service type (daisy_staff or daisy_student)
             cache_backend: Cache backend for authentication cookies (default: NullCache)
             cache_ttl: Cache TTL in seconds (default: 86400 = 24 hours)
+            max_concurrent: Maximum concurrent requests for bulk operations (default: 20)
 
         Raises:
             AuthenticationError: If username/password not provided and not in env vars
@@ -69,6 +75,7 @@ class DaisyClient:
             )
         self.service = service
         self.base_url = DSV_URLS[service]
+        self.max_concurrent = max_concurrent
         self.auth = ShibbolethAuth(
             self.username, self.password, cache_backend=cache_backend, cache_ttl=cache_ttl
         )
@@ -301,43 +308,81 @@ class DaisyClient:
     def get_all_staff(
         self,
         institution_id: str | InstitutionID = InstitutionID.DSV,
-        batch_size: int = 10,
-        delay_between_batches: float = 0.5,
+        max_retries: int = 3,
     ) -> list[Staff]:
         """Get all staff members with complete details.
 
-        Note: For sync version, batch_size and delay_between_batches are ignored.
-        They exist for API compatibility with async version.
+        Fetches staff details in parallel using threads, retrying failures.
 
         Args:
             institution_id: Institution ID (default: InstitutionID.DSV)
-            batch_size: Ignored in sync version (exists for API compatibility)
-            delay_between_batches: Ignored in sync version (exists for API compatibility)
+            max_retries: Maximum retry attempts for failed fetches (default: 3)
 
         Returns:
             List of Staff objects with complete details
         """
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
         self._ensure_authenticated()
 
         logger.info(f"Fetching all staff for institution {institution_id}")
 
         # First, search for all staff
         staff_list = self.search_staff(institution_id=institution_id)
-
-        # Then fetch details for each (sequentially)
         logger.info(f"Fetching details for {len(staff_list)} staff members...")
 
-        detailed_staff = []
-        for i, staff in enumerate(staff_list):
-            try:
-                detailed = self.get_staff_details(staff.person_id)
-                detailed_staff.append(detailed)
+        detailed_staff: list[Staff] = []
+        failed: list[Staff] = []
 
-                if (i + 1) % 10 == 0:
-                    logger.info(f"Progress: {i + 1}/{len(staff_list)}")
-            except Exception as e:
-                logger.error(f"Error fetching details for {staff.name}: {e}")
-                raise
+        def fetch_one(staff: Staff) -> tuple[Staff, Staff | None]:
+            """Fetch details for one staff member."""
+            try:
+                return staff, self.get_staff_details(staff.person_id)
+            except (NetworkError, ParseError, httpx.HTTPError) as e:
+                logger.warning(f"Error fetching details for {staff.name}: {e}")
+                return staff, None
+
+        # First pass - fetch all in parallel
+        with ThreadPoolExecutor(max_workers=self.max_concurrent) as executor:
+            futures = {executor.submit(fetch_one, staff): staff for staff in staff_list}
+            completed = 0
+
+            for future in as_completed(futures):
+                staff, result = future.result()
+                completed += 1
+
+                if result is not None:
+                    detailed_staff.append(result)
+                else:
+                    failed.append(staff)
+
+                if completed % 50 == 0:
+                    logger.info(f"Progress: {completed}/{len(staff_list)}")
+
+        # Retry failed ones
+        for retry in range(max_retries):
+            if not failed:
+                break
+
+            logger.info(f"Retry {retry + 1}/{max_retries}: {len(failed)} staff members")
+            still_failed: list[Staff] = []
+
+            with ThreadPoolExecutor(max_workers=self.max_concurrent) as executor:
+                futures = {executor.submit(fetch_one, staff): staff for staff in failed}
+
+                for future in as_completed(futures):
+                    staff, result = future.result()
+                    if result is not None:
+                        detailed_staff.append(result)
+                    else:
+                        still_failed.append(staff)
+
+            failed = still_failed
+
+        if failed:
+            logger.error(f"Failed to fetch {len(failed)} staff after {max_retries} retries")
+            for staff in failed:
+                logger.error(f"  - {staff.name} (ID: {staff.person_id})")
 
         logger.info(f"Completed: {len(detailed_staff)} staff members with details")
         return detailed_staff
@@ -394,6 +439,7 @@ class AsyncDaisyClient:
         service: str = "daisy_staff",
         cache_backend: CacheBackend | None = None,
         cache_ttl: int = 86400,
+        max_concurrent: int = DEFAULT_MAX_CONCURRENT,
     ):
         """Initialize async Daisy client.
 
@@ -403,6 +449,7 @@ class AsyncDaisyClient:
             service: Service type (daisy_staff or daisy_student)
             cache_backend: Cache backend for authentication cookies (default: NullCache)
             cache_ttl: Cache TTL in seconds (default: 86400 = 24 hours)
+            max_concurrent: Maximum concurrent requests for bulk operations (default: 20)
 
         Raises:
             AuthenticationError: If username/password not provided and not in env vars
@@ -419,6 +466,7 @@ class AsyncDaisyClient:
 
         self.service = service
         self.base_url = DSV_URLS[service]
+        self.max_concurrent = max_concurrent
         self.auth = AsyncShibbolethAuth(
             self.username, self.password, cache_backend=cache_backend, cache_ttl=cache_ttl
         )
@@ -669,15 +717,15 @@ class AsyncDaisyClient:
     async def get_all_staff(
         self,
         institution_id: str | InstitutionID = InstitutionID.DSV,
-        batch_size: int = 10,
-        delay_between_batches: float = 0.5,
+        max_retries: int = 3,
     ) -> list[Staff]:
         """Get all staff members with complete details.
 
+        Fetches staff details concurrently in batches, retrying failures.
+
         Args:
             institution_id: Institution ID (default: InstitutionID.DSV)
-            batch_size: Number of staff details to fetch concurrently (default: 10)
-            delay_between_batches: Delay in seconds between batches (default: 0.5)
+            max_retries: Maximum retry attempts for failed fetches (default: 3)
 
         Returns:
             List of Staff objects with complete details
@@ -687,38 +735,59 @@ class AsyncDaisyClient:
         # First, get list of all staff
         logger.info(f"Fetching all staff for institution {institution_id}")
         staff_list = await self.search_staff(institution_id=institution_id)
-        logger.info(f"Found {len(staff_list)} staff members, fetching details...")
+        logger.info(f"Fetching details for {len(staff_list)} staff members...")
 
-        detailed_staff = []
+        detailed_staff: list[Staff] = []
+        failed: list[Staff] = []
 
-        # Fetch details in batches
-        for i in range(0, len(staff_list), batch_size):
-            batch = staff_list[i : i + batch_size]
-            batch_num = i // batch_size + 1
-            total_batches = (len(staff_list) + batch_size - 1) // batch_size
-            logger.debug(f"Fetching batch {batch_num}/{total_batches}")
+        async def fetch_one(staff: Staff) -> tuple[Staff, Staff | None]:
+            """Fetch details for one staff member."""
+            try:
+                result = await self.get_staff_details(staff.person_id)
+                return staff, result
+            except (NetworkError, ParseError, httpx.HTTPError) as e:
+                logger.warning(f"Error fetching details for {staff.name}: {e}")
+                return staff, None
 
-            # Create tasks for this batch
-            tasks = []
-            for staff in batch:
+        # First pass - fetch all in batches
+        for i in range(0, len(staff_list), self.max_concurrent):
+            batch = staff_list[i : i + self.max_concurrent]
 
-                async def fetch_details(s: Staff) -> Staff:
-                    """Fetch staff details."""
-                    try:
-                        return await self.get_staff_details(s.person_id)
-                    except Exception as e:
-                        logger.error(f"Error fetching details for {s.name}: {e}")
-                        raise
+            tasks = [fetch_one(staff) for staff in batch]
+            results = await asyncio.gather(*tasks)
 
-                tasks.append(fetch_details(staff))
+            for staff, result in results:
+                if result is not None:
+                    detailed_staff.append(result)
+                else:
+                    failed.append(staff)
 
-            # Execute batch concurrently
-            batch_results = await asyncio.gather(*tasks)
-            detailed_staff.extend(batch_results)
+            done = min(i + self.max_concurrent, len(staff_list))
+            logger.info(f"Progress: {done}/{len(staff_list)}")
 
-            # Delay between batches (except for last batch)
-            if i + batch_size < len(staff_list):
-                await asyncio.sleep(delay_between_batches)
+        # Retry failed ones
+        for retry in range(max_retries):
+            if not failed:
+                break
+
+            logger.info(f"Retry {retry + 1}/{max_retries}: {len(failed)} staff members")
+            still_failed: list[Staff] = []
+
+            tasks = [fetch_one(staff) for staff in failed]
+            results = await asyncio.gather(*tasks)
+
+            for staff, result in results:
+                if result is not None:
+                    detailed_staff.append(result)
+                else:
+                    still_failed.append(staff)
+
+            failed = still_failed
+
+        if failed:
+            logger.error(f"Failed to fetch {len(failed)} staff after {max_retries} retries")
+            for staff in failed:
+                logger.error(f"  - {staff.name} (ID: {staff.person_id})")
 
         logger.info(f"Completed: {len(detailed_staff)} staff members with details")
         return detailed_staff
