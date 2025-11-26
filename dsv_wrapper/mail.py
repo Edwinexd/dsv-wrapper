@@ -11,6 +11,7 @@ import hashlib
 import html
 import imaplib
 import logging
+import os
 import re
 import smtplib
 import ssl
@@ -201,24 +202,41 @@ class MailClient:
 
     def __init__(
         self,
-        username: str,
-        password: str,
-        email_address: str,
+        username: str | None = None,
+        password: str | None = None,
+        email_address: str | None = None,
         timeout: int = 30,
     ):
         """Initialize the mail client.
 
         Args:
-            username: SU username (e.g., 'abcd1234')
-            password: SU password
-            email_address: The email address to use as the sender address.
+            username: SU username (default: read from SU_USERNAME env var)
+            password: SU password (default: read from SU_PASSWORD env var)
+            email_address: The email address to use as the sender address
+                (default: read from SU_EMAIL env var).
                 For personal accounts, use your personal email address.
                 For function accounts (funktionskonto), use the function account's email address.
             timeout: Request timeout in seconds
+
+        Raises:
+            AuthenticationError: If credentials or email not provided and not in env vars
         """
-        self._username = username
-        self._password = password
-        self._email_address = email_address
+        # Get credentials from env vars if not provided
+        self._username = username or os.environ.get("SU_USERNAME")
+        self._password = password or os.environ.get("SU_PASSWORD")
+        self._email_address = email_address or os.environ.get("SU_EMAIL")
+
+        if not self._username or not self._password:
+            raise AuthenticationError(
+                "Username and password must be provided either as arguments or "
+                "via SU_USERNAME and SU_PASSWORD environment variables"
+            )
+        if not self._email_address:
+            raise AuthenticationError(
+                "Email address must be provided either as an argument or "
+                "via SU_EMAIL environment variable"
+            )
+
         self._timeout = timeout
         self._imap: imaplib.IMAP4_SSL | None = None
         self._user_email: str | None = None
@@ -627,20 +645,24 @@ class AsyncMailClient:
 
     def __init__(
         self,
-        username: str,
-        password: str,
-        email_address: str,
+        username: str | None = None,
+        password: str | None = None,
+        email_address: str | None = None,
         timeout: int = 30,
     ):
         """Initialize the async mail client.
 
         Args:
-            username: SU username (e.g., 'abcd1234')
-            password: SU password
-            email_address: The email address to use as the sender address.
+            username: SU username (default: read from SU_USERNAME env var)
+            password: SU password (default: read from SU_PASSWORD env var)
+            email_address: The email address to use as the sender address
+                (default: read from SU_EMAIL env var).
                 For personal accounts, use your personal email address.
                 For function accounts (funktionskonto), use the function account's email address.
             timeout: Request timeout in seconds
+
+        Raises:
+            AuthenticationError: If credentials or email not provided and not in env vars
         """
         self._username = username
         self._password = password
