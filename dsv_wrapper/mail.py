@@ -590,15 +590,16 @@ class MailClient:
             return False
 
         try:
+            seq_num = change_key.encode()  # IMAP expects bytes
             if permanent:
                 # Mark as deleted and expunge
-                self._imap.store(change_key.encode(), "+FLAGS", "\\Deleted")
+                self._imap.store(seq_num, "+FLAGS", "\\Deleted")
                 self._imap.expunge()
             else:
                 # Move to deleted items
                 deleted_folder = self._get_imap_folder("deleteditems")
-                self._imap.copy(change_key.encode(), deleted_folder)
-                self._imap.store(change_key.encode(), "+FLAGS", "\\Deleted")
+                self._imap.copy(seq_num, deleted_folder)
+                self._imap.store(seq_num, "+FLAGS", "\\Deleted")
                 self._imap.expunge()
             return True
         except imaplib.IMAP4.error as e:
