@@ -187,17 +187,16 @@ def _html_to_plain_text(html_content: str) -> str:
 
 
 class MailClient:
-    """Synchronous client for SU webmail (ebox.su.se) via standard IMAP/SMTP.
+    """Synchronous client for SU webmail (ebox.su.se) via IMAP/SMTP.
 
-    This client uses standard IMAP (port 993/SSL) for reading emails and
-    SMTP (port 587/STARTTLS) for sending emails. This is much more robust
-    than the OWA API approach.
+    This client uses IMAP (port 993/SSL) for reading emails and
+    SMTP (port 587/STARTTLS) for sending emails.
 
     Authentication uses the Windows AD domain format: winadsu\\username
 
     For function accounts (funktionskonto), use the function account's email
     address as the `email_address` parameter. Authentication is still done
-    with your personal username.
+    with your personal username and password.
     """
 
     def __init__(
@@ -332,8 +331,7 @@ class MailClient:
                 msg = MIMEText(body, "plain", "utf-8")
 
             # Set headers
-            from_addr = self._user_email or f"{self._username}@dsv.su.se"
-            msg["From"] = from_addr
+            msg["From"] = self._user_email
             msg["To"] = ", ".join(to)
             msg["Subject"] = subject
 
@@ -353,7 +351,7 @@ class MailClient:
                 smtp.login(login_username, self._password)
 
                 all_recipients = to + cc
-                smtp.sendmail(from_addr, all_recipients, msg.as_string())
+                smtp.sendmail(self._user_email, all_recipients, msg.as_string())
 
             # Optionally save to Sent Items via IMAP
             if save_to_sent and self._imap:
@@ -638,7 +636,7 @@ class MailClient:
 
 
 class AsyncMailClient:
-    """Asynchronous client for SU webmail (ebox.su.se) via standard IMAP/SMTP.
+    """Asynchronous client for SU webmail (ebox.su.se) via IMAP/SMTP.
 
     This is a thin async wrapper around MailClient using asyncio.to_thread().
     """
