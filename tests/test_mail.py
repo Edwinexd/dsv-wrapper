@@ -17,8 +17,8 @@ from dsv_wrapper import (
     SendEmailResult,
 )
 
-# Skip all tests if credentials not set
-pytestmark = pytest.mark.skipif(
+# Mark for tests that require credentials
+requires_credentials = pytest.mark.skipif(
     not os.environ.get("SU_USERNAME") or not os.environ.get("SU_PASSWORD"),
     reason="SU_USERNAME and SU_PASSWORD environment variables required",
 )
@@ -33,6 +33,7 @@ def credentials():
     }
 
 
+@requires_credentials
 class TestMailClient:
     """Tests for synchronous MailClient."""
 
@@ -43,7 +44,8 @@ class TestMailClient:
 
             assert isinstance(folder, MailFolder)
             assert folder.id
-            assert folder.name.lower() in ("inbox", "inkorgen")
+            # IMAP returns "INBOX" not localized names
+            assert folder.name.upper() == "INBOX"
             assert folder.total_count >= 0
             assert folder.unread_count >= 0
 
@@ -188,6 +190,7 @@ class TestMailClient:
                         break
 
 
+@requires_credentials
 class TestAsyncMailClient:
     """Tests for asynchronous AsyncMailClient."""
 

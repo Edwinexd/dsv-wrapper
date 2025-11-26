@@ -84,18 +84,20 @@
 - Uses JSON API (no HTML parsing required)
 - All 7 clickmap tests passing
 
-### MailClient (New - 2025-11-25)
-- **New client for mail.su.se** - SU webmail via Outlook Web App (OWA) API
-- Both `MailClient` and `AsyncMailClient` implemented with httpx
-- **Authentication**: Complex SSO flow through ADFS + Shibboleth IDP
-- **API**: Uses OWA JSON API at ebox.su.se
+### MailClient (Refactored - 2025-11-26)
+- **Refactored to use standard IMAP/SMTP** - Much more robust than OWA API
+- Both `MailClient` and `AsyncMailClient` implemented with Python's `imaplib` and `smtplib`
+- **Server configuration**:
+  - IMAP: `ebox.su.se:993` (SSL/TLS)
+  - SMTP: `ebox.su.se:587` (STARTTLS)
+  - Username format: `winadsu\username`
 - **Client methods**:
   - `get_folder(folder_name)`: Get folder info (inbox, drafts, sentitems, etc.)
   - `get_emails(folder_name, limit)`: List emails in a folder (headers only, no body)
   - `get_email(message_id, change_key, body_type)`: Get full email content including body
   - `send_email(to, subject, body, body_type, cc, save_to_sent)`: Send email
   - `delete_email(message_id, permanent)`: Delete email (move to trash or permanent)
-- **Models**:
+- **Models** (unchanged):
   - `MailFolder`: Folder with id, name, total_count, unread_count
   - `EmailMessage`: Full email with subject, body, sender, recipients, dates, etc.
   - `EmailAddress`: Email address with name
@@ -103,15 +105,16 @@
   - `BodyType` enum: TEXT or HTML
   - `Importance` enum: LOW, NORMAL, HIGH
 - **Implementation details**:
-  - `get_folder` uses `GetFolder` API with `DistinguishedFolderId`
-  - `get_emails` requires two API calls: GetFolder (to get actual folder ID) + FindItem (with `Traversal: Shallow`)
-  - `get_email` uses `GetItem` with `AllProperties` shape
-  - `send_email` uses three-step process: CreateItem -> UpdateItem (add recipients) -> SendItem
-- **Known limitations**:
-  - The OWA JSON API is finicky about request formats - requires exact field structures
-  - FindFolder doesn't work (serialization errors)
-  - FindItem requires actual folder ID (not distinguished name) and `Traversal: Shallow`
-- **Undo Send note**: If "Undo Send" is enabled in OWA settings, sent emails appear in drafts for 30 seconds before being sent
+  - Uses IMAP for reading emails with proper MIME parsing
+  - Uses SMTP for sending with STARTTLS encryption
+  - `change_key` field now stores IMAP sequence number (needed for get_email and delete)
+  - Folder IDs are hashes of folder names (IMAP doesn't have native IDs)
+  - Email IDs are hashes of Message-ID headers
+- **Benefits over OWA API**:
+  - Standard protocols - no fragile JSON API dependencies
+  - Simpler authentication - direct username/password
+  - Better error handling - clear IMAP/SMTP error codes
+  - No session management or token handling needed
 
 ### Strict Error Handling (Complete)
 - **Replaced silent failures with explicit ParseError exceptions**
@@ -142,7 +145,7 @@
 - ✅ Daisy client migration to httpx
 - ✅ Handledning client migration to httpx
 - ✅ **Clickmap client added** (new service - 2025-11-25)
-- ✅ **Mail client added** (new service - 2025-11-25) - Send and read emails via OWA API
+- ✅ **Mail client refactored to IMAP/SMTP** (2025-11-26) - Replaced fragile OWA API with standard protocols
 - ✅ BaseAsyncClient removed
 - ✅ Old unified client files removed (base_unified.py, shibboleth_unified.py, actlab_unified.py)
 - ✅ requirements.txt updated (removed requests and aiohttp dependencies)
@@ -176,9 +179,10 @@
 - **Test coverage: 52/52 passing - 100%!**
 - All authentication tests pass including invalid credentials detection
 - API parity tests verify sync/async clients have identical method signatures
-- All ACTLab, Daisy, Handledning, Clickmap, and Mail tests pass with httpx implementation
+- All ACTLab, Daisy, Handledning, Clickmap, and Mail tests pass
 - Cookie handling fixed: domain/path properly preserved in async clients
 - Enum serialization fixed: InstitutionID properly converted to value in form data
 - Clickmap tests include: placements retrieval, search, filtering, model validation, API parity
 - Mail tests include: folder info, email listing, full email retrieval, send to self, API parity
+- Mail tests now use IMAP/SMTP instead of OWA API
 - Mail send tests use `AUTOMATEDTESTSEND - {timestamp}` pattern for easy cleanup
