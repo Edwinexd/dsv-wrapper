@@ -179,8 +179,7 @@ class TestMailClient:
 
             # Delete if found
             if test_email:
-                deleted = client.delete_email(test_email.change_key, permanent=True)
-                assert deleted is True
+                client.delete_email(test_email.change_key, permanent=True)
 
                 # Also delete from sent items
                 sent_emails = client.get_emails("sentitems", limit=20)

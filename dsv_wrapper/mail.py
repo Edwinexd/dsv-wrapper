@@ -20,7 +20,7 @@ from email.message import EmailMessage as StdEmailMessage
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
-from .exceptions import AuthenticationError, NetworkError, ParseError
+from .exceptions import AuthenticationError, NetworkError, ParseError, ValidationError
 from .models.mail import (
     BodyType,
     EmailAddress,
@@ -193,19 +193,33 @@ class MailClient:
     than the OWA API approach.
 
     Authentication uses the Windows AD domain format: winadsu\\username
+
+    For function accounts (funktionskonto), use the function account's email
+    address as the `email_address` parameter. Authentication is still done
+    with your personal username.
     """
 
-    def __init__(self, username: str, password: str, timeout: int = 30):
+    def __init__(
+        self,
+        username: str,
+        password: str,
+        timeout: int = 30,
+        email_address: str | None = None,
+    ):
         """Initialize the mail client.
 
         Args:
             username: SU username (e.g., 'abcd1234')
             password: SU password
             timeout: Request timeout in seconds
+            email_address: Optional email address for function accounts (funktionskonto).
+                If not provided, defaults to username@dsv.su.se.
+                For function accounts, use the function account's email address.
         """
         self._username = username
         self._password = password
         self._timeout = timeout
+        self._email_address = email_address
         self._imap: imaplib.IMAP4_SSL | None = None
         self._user_email: str | None = None
 
@@ -230,9 +244,8 @@ class MailClient:
             login_username = f"winadsu\\{self._username}"
             self._imap.login(login_username, self._password)
 
-            # Try to get user's email from IMAP (some servers support this)
-            # Default to username@dsv.su.se if not available
-            self._user_email = f"{self._username}@dsv.su.se"
+            # Use provided email address (for function accounts) or default to username@dsv.su.se
+            self._user_email = self._email_address or f"{self._username}@dsv.su.se"
 
             logger.info("Successfully connected to ebox.su.se IMAP")
 
@@ -566,7 +579,7 @@ class MailClient:
         except imaplib.IMAP4.error as e:
             raise ParseError(f"IMAP error fetching email: {e}") from e
 
-    def delete_email(self, change_key: str, permanent: bool = False) -> bool:
+    def delete_email(self, change_key: str, permanent: bool = False) -> None:
         """Delete an email using its IMAP sequence number.
 
         Note: Use the change_key field from EmailMessage returned by get_emails().
@@ -576,18 +589,19 @@ class MailClient:
             change_key: The IMAP sequence number from EmailMessage.change_key field.
             permanent: If True, permanently delete. If False, move to Deleted Items.
 
-        Returns:
-            True if deletion was successful, False otherwise
+        Raises:
+            NetworkError: If IMAP is not connected.
+            ValidationError: If change_key is invalid.
+            ParseError: If the IMAP operation fails.
         """
         if not self._imap:
             raise NetworkError("IMAP not connected")
 
         if not change_key or not change_key.isdigit():
-            logger.warning(
+            raise ValidationError(
                 "delete_email requires a valid change_key (IMAP sequence number). "
                 "Use the change_key field from EmailMessage returned by get_emails()."
             )
-            return False
 
         try:
             seq_num = change_key.encode()  # IMAP expects bytes
@@ -601,10 +615,8 @@ class MailClient:
                 self._imap.copy(seq_num, deleted_folder)
                 self._imap.store(seq_num, "+FLAGS", "\\Deleted")
                 self._imap.expunge()
-            return True
         except imaplib.IMAP4.error as e:
-            logger.warning(f"Failed to delete email: {e}")
-            return False
+            raise ParseError(f"Failed to delete email: {e}") from e
 
 
 class AsyncMailClient:
@@ -613,22 +625,34 @@ class AsyncMailClient:
     This is a thin async wrapper around MailClient using asyncio.to_thread().
     """
 
-    def __init__(self, username: str, password: str, timeout: int = 30):
+    def __init__(
+        self,
+        username: str,
+        password: str,
+        timeout: int = 30,
+        email_address: str | None = None,
+    ):
         """Initialize the async mail client.
 
         Args:
             username: SU username (e.g., 'abcd1234')
             password: SU password
             timeout: Request timeout in seconds
+            email_address: Optional email address for function accounts (funktionskonto).
+                If not provided, defaults to username@dsv.su.se.
+                For function accounts, use the function account's email address.
         """
         self._username = username
         self._password = password
         self._timeout = timeout
+        self._email_address = email_address
         self._sync_client: MailClient | None = None
 
     async def __aenter__(self) -> "AsyncMailClient":
         """Enter async context manager and authenticate."""
-        self._sync_client = MailClient(self._username, self._password, self._timeout)
+        self._sync_client = MailClient(
+            self._username, self._password, self._timeout, self._email_address
+        )
         await asyncio.to_thread(self._sync_client.__enter__)
         return self
 
@@ -676,13 +700,18 @@ class AsyncMailClient:
             self._sync_client.get_email, message_id, change_key, body_type
         )
 
-    async def delete_email(self, change_key: str, permanent: bool = False) -> bool:
+    async def delete_email(self, change_key: str, permanent: bool = False) -> None:
         """Delete an email using its IMAP sequence number.
 
         Note: Use the change_key field from EmailMessage returned by get_emails().
+
+        Raises:
+            NetworkError: If IMAP is not connected.
+            ValidationError: If change_key is invalid.
+            ParseError: If the IMAP operation fails.
         """
         if not self._sync_client:
             raise NetworkError("Client not initialized")
-        return await asyncio.to_thread(
+        await asyncio.to_thread(
             self._sync_client.delete_email, change_key, permanent
         )
