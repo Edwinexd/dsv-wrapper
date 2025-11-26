@@ -8,8 +8,10 @@ import asyncio
 import email
 import email.utils
 import hashlib
+import html
 import imaplib
 import logging
+import re
 import smtplib
 import ssl
 from datetime import UTC, datetime
@@ -153,6 +155,36 @@ def _has_attachments(msg: StdEmailMessage) -> bool:
     return False
 
 
+def _html_to_plain_text(html_content: str) -> str:
+    """Convert HTML content to plain text.
+
+    This is a simple conversion that strips HTML tags and decodes entities.
+    For more complex HTML, the output may not be perfect but will be readable.
+    """
+    # Remove script and style blocks
+    text = re.sub(
+        r"<(script|style)[^>]*>.*?</\1>", "", html_content, flags=re.IGNORECASE | re.DOTALL
+    )
+
+    # Replace common block elements with newlines
+    text = re.sub(r"<br\s*/?>", "\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"</p>", "\n\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"</div>", "\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"</h[1-6]>", "\n\n", text, flags=re.IGNORECASE)
+
+    # Remove all remaining HTML tags
+    text = re.sub(r"<[^>]+>", "", text)
+
+    # Decode HTML entities
+    text = html.unescape(text)
+
+    # Normalize whitespace
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    text = text.strip()
+
+    return text
+
+
 class MailClient:
     """Synchronous client for SU webmail (ebox.su.se) via standard IMAP/SMTP.
 
@@ -259,8 +291,9 @@ class MailClient:
             # Create email message
             if body_type == BodyType.HTML:
                 msg = MIMEMultipart("alternative")
-                # Add plain text version
-                text_part = MIMEText(body, "plain", "utf-8")
+                # Add plain text version (converted from HTML)
+                plain_text = _html_to_plain_text(body)
+                text_part = MIMEText(plain_text, "plain", "utf-8")
                 html_part = MIMEText(body, "html", "utf-8")
                 msg.attach(text_part)
                 msg.attach(html_part)
