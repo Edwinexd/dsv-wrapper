@@ -203,23 +203,23 @@ class MailClient:
         self,
         username: str,
         password: str,
+        email_address: str,
         timeout: int = 30,
-        email_address: str | None = None,
     ):
         """Initialize the mail client.
 
         Args:
             username: SU username (e.g., 'abcd1234')
             password: SU password
+            email_address: The email address to use as the sender address.
+                For personal accounts, use your personal email address.
+                For function accounts (funktionskonto), use the function account's email address.
             timeout: Request timeout in seconds
-            email_address: Optional email address for function accounts (funktionskonto).
-                If not provided, defaults to username@dsv.su.se.
-                For function accounts, use the function account's email address.
         """
         self._username = username
         self._password = password
-        self._timeout = timeout
         self._email_address = email_address
+        self._timeout = timeout
         self._imap: imaplib.IMAP4_SSL | None = None
         self._user_email: str | None = None
 
@@ -244,8 +244,8 @@ class MailClient:
             login_username = f"winadsu\\{self._username}"
             self._imap.login(login_username, self._password)
 
-            # Use provided email address (for function accounts) or default to username@dsv.su.se
-            self._user_email = self._email_address or f"{self._username}@dsv.su.se"
+            # Use the provided email address
+            self._user_email = self._email_address
 
             logger.info("Successfully connected to ebox.su.se IMAP")
 
@@ -629,29 +629,29 @@ class AsyncMailClient:
         self,
         username: str,
         password: str,
+        email_address: str,
         timeout: int = 30,
-        email_address: str | None = None,
     ):
         """Initialize the async mail client.
 
         Args:
             username: SU username (e.g., 'abcd1234')
             password: SU password
+            email_address: The email address to use as the sender address.
+                For personal accounts, use your personal email address.
+                For function accounts (funktionskonto), use the function account's email address.
             timeout: Request timeout in seconds
-            email_address: Optional email address for function accounts (funktionskonto).
-                If not provided, defaults to username@dsv.su.se.
-                For function accounts, use the function account's email address.
         """
         self._username = username
         self._password = password
-        self._timeout = timeout
         self._email_address = email_address
+        self._timeout = timeout
         self._sync_client: MailClient | None = None
 
     async def __aenter__(self) -> "AsyncMailClient":
         """Enter async context manager and authenticate."""
         self._sync_client = MailClient(
-            self._username, self._password, self._timeout, self._email_address
+            self._username, self._password, self._email_address, self._timeout
         )
         await asyncio.to_thread(self._sync_client.__enter__)
         return self

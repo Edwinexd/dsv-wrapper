@@ -19,8 +19,10 @@ from dsv_wrapper import (
 
 # Mark for tests that require credentials
 requires_credentials = pytest.mark.skipif(
-    not os.environ.get("SU_USERNAME") or not os.environ.get("SU_PASSWORD"),
-    reason="SU_USERNAME and SU_PASSWORD environment variables required",
+    not os.environ.get("SU_USERNAME")
+    or not os.environ.get("SU_PASSWORD")
+    or not os.environ.get("SU_EMAIL"),
+    reason="SU_USERNAME, SU_PASSWORD and SU_EMAIL environment variables required",
 )
 
 
@@ -30,6 +32,7 @@ def credentials():
     return {
         "username": os.environ.get("SU_USERNAME"),
         "password": os.environ.get("SU_PASSWORD"),
+        "email_address": os.environ.get("SU_EMAIL"),
     }
 
 
@@ -93,7 +96,7 @@ class TestMailClient:
 
     def test_send_email_to_self(self, credentials):
         """Test sending email to self with AUTOMATEDTESTSEND pattern."""
-        my_email = os.environ.get("SU_EMAIL", "edwinsu@dsv.su.se")
+        my_email = credentials["email_address"]
 
         timestamp = int(time.time())
         subject = f"AUTOMATEDTESTSEND - {timestamp}"
@@ -122,7 +125,7 @@ class TestMailClient:
 
     def test_send_email_html(self, credentials):
         """Test sending HTML email to self."""
-        my_email = os.environ.get("SU_EMAIL", "edwinsu@dsv.su.se")
+        my_email = credentials["email_address"]
 
         timestamp = int(time.time())
         subject = f"AUTOMATEDTESTSEND - {timestamp}"
@@ -149,7 +152,7 @@ class TestMailClient:
 
     def test_send_and_delete_email(self, credentials):
         """Test sending email and then deleting it from inbox."""
-        my_email = os.environ.get("SU_EMAIL", "edwinsu@dsv.su.se")
+        my_email = credentials["email_address"]
 
         timestamp = int(time.time())
         subject = f"AUTOMATEDTESTSEND - {timestamp}"
@@ -216,7 +219,7 @@ class TestAsyncMailClient:
     @pytest.mark.asyncio
     async def test_async_send_email(self, credentials):
         """Test async sending email to self."""
-        my_email = os.environ.get("SU_EMAIL", "edwinsu@dsv.su.se")
+        my_email = credentials["email_address"]
 
         timestamp = int(time.time())
         subject = f"AUTOMATEDTESTSEND - {timestamp}"
