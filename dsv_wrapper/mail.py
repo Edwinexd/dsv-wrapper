@@ -328,9 +328,9 @@ class MailClient:
             if save_to_sent and self._imap:
                 try:
                     sent_folder = self._get_imap_folder("sentitems")
-                    # Add to sent folder
-                    now = imaplib.Time2Internaldate(datetime.now(tz=UTC))
-                    self._imap.append(sent_folder, "\\Seen", now, msg.as_bytes())
+                    # Add to sent folder with current time (email was just sent)
+                    sent_time = imaplib.Time2Internaldate(datetime.now(tz=UTC))
+                    self._imap.append(sent_folder, "\\Seen", sent_time, msg.as_bytes())
                 except imaplib.IMAP4.error as e:
                     logger.warning(f"Failed to save to Sent Items: {e}")
                     # Don't fail the send if saving to sent fails
@@ -483,7 +483,9 @@ class MailClient:
                             received_at=received_at,
                             sent_at=sent_at,
                             is_read=is_read,
-                            has_attachments=False,  # Can't tell from headers alone
+                            # has_attachments is False in list view - can't determine from
+                            # headers alone. Use get_email() to get accurate attachment info.
+                            has_attachments=False,
                             importance=_parse_importance(msg),
                         )
                     )
@@ -564,34 +566,39 @@ class MailClient:
         except imaplib.IMAP4.error as e:
             raise ParseError(f"IMAP error fetching email: {e}") from e
 
-    def delete_email(self, message_id: str, permanent: bool = False) -> bool:
+    def delete_email(
+        self, message_id: str, change_key: str = "", permanent: bool = False
+    ) -> bool:
         """Delete an email by ID.
 
-        Note: Due to IMAP limitations, we need the change_key (sequence number).
-        This method will search for the email by Message-ID header.
+        Note: For IMAP, the change_key (IMAP sequence number) is required.
+        The message_id alone (which is a hash) cannot be used to locate the message.
+        Get the change_key from the email's change_key field returned by get_emails().
 
         Args:
-            message_id: The email message ID (hash from get_emails)
+            message_id: The email message ID (hash from get_emails). Currently unused
+                but kept for API compatibility.
+            change_key: The IMAP sequence number (required for IMAP operations).
+                This is the change_key field from EmailMessage returned by get_emails().
             permanent: If True, permanently delete. If False, move to Deleted Items.
 
         Returns:
-            True if deletion was successful
+            True if deletion was successful, False otherwise
         """
         if not self._imap:
             raise NetworkError("IMAP not connected")
 
-        # Note: This implementation is limited because we use a hash as ID
-        # We would need to search by the original Message-ID header
-        # For now, we'll log a warning and return False
+        # Use change_key (IMAP sequence number) if provided, otherwise try message_id
+        seq_num = change_key if change_key else message_id
 
-        logger.warning(
-            "delete_email requires change_key to work reliably with IMAP. "
-            "Consider using the IMAP sequence number from the email's change_key field."
-        )
+        if not seq_num or not seq_num.isdigit():
+            logger.warning(
+                "delete_email requires a valid change_key (IMAP sequence number). "
+                "Use the change_key field from EmailMessage returned by get_emails()."
+            )
+            return False
 
-        # Try to use message_id as the sequence number directly if it looks like one
         try:
-            seq_num = message_id
             if permanent:
                 # Mark as deleted and expunge
                 self._imap.store(seq_num.encode(), "+FLAGS", "\\Deleted")
@@ -603,7 +610,8 @@ class MailClient:
                 self._imap.store(seq_num.encode(), "+FLAGS", "\\Deleted")
                 self._imap.expunge()
             return True
-        except (imaplib.IMAP4.error, ValueError):
+        except imaplib.IMAP4.error as e:
+            logger.warning(f"Failed to delete email: {e}")
             return False
 
 
@@ -676,8 +684,15 @@ class AsyncMailClient:
             self._sync_client.get_email, message_id, change_key, body_type
         )
 
-    async def delete_email(self, message_id: str, permanent: bool = False) -> bool:
-        """Delete an email by ID."""
+    async def delete_email(
+        self, message_id: str, change_key: str = "", permanent: bool = False
+    ) -> bool:
+        """Delete an email by ID.
+
+        Note: For IMAP, the change_key (IMAP sequence number) is required.
+        """
         if not self._sync_client:
             raise NetworkError("Client not initialized")
-        return await asyncio.to_thread(self._sync_client.delete_email, message_id, permanent)
+        return await asyncio.to_thread(
+            self._sync_client.delete_email, message_id, change_key, permanent
+        )

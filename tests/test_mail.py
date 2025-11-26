@@ -118,7 +118,7 @@ class TestMailClient:
                 emails = client.get_emails(folder, limit=20)
                 for email in emails:
                     if email.subject == subject:
-                        client.delete_email(email.id, permanent=True)
+                        client.delete_email(email.id, email.change_key, permanent=True)
 
     def test_send_email_html(self, credentials):
         """Test sending HTML email to self."""
@@ -145,7 +145,7 @@ class TestMailClient:
                 emails = client.get_emails(folder, limit=20)
                 for email in emails:
                     if email.subject == subject:
-                        client.delete_email(email.id, permanent=True)
+                        client.delete_email(email.id, email.change_key, permanent=True)
 
     def test_send_and_delete_email(self, credentials):
         """Test sending email and then deleting it from inbox."""
@@ -179,14 +179,16 @@ class TestMailClient:
 
             # Delete if found
             if test_email:
-                deleted = client.delete_email(test_email.id, permanent=True)
+                deleted = client.delete_email(
+                    test_email.id, test_email.change_key, permanent=True
+                )
                 assert deleted is True
 
                 # Also delete from sent items
                 sent_emails = client.get_emails("sentitems", limit=20)
                 for email in sent_emails:
                     if email.subject == subject:
-                        client.delete_email(email.id, permanent=True)
+                        client.delete_email(email.id, email.change_key, permanent=True)
                         break
 
 
@@ -238,7 +240,7 @@ class TestAsyncMailClient:
                 emails = await client.get_emails(folder, limit=20)
                 for email in emails:
                     if email.subject == subject:
-                        await client.delete_email(email.id, permanent=True)
+                        await client.delete_email(email.id, email.change_key, permanent=True)
 
 
 class TestMailModels:
