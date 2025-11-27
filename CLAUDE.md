@@ -96,7 +96,7 @@
   - `get_emails(folder_name, limit)`: List emails in a folder (headers only, no body)
   - `get_email(message_id, change_key, body_type)`: Get full email content including body
   - `send_email(to, subject, body, body_type, cc, save_to_sent)`: Send email
-  - `delete_email(message_id, permanent)`: Delete email (move to trash or permanent)
+  - `delete_email(change_key, permanent)`: Delete email (move to trash or permanent)
 - **Models** (unchanged):
   - `MailFolder`: Folder with id, name, total_count, unread_count
   - `EmailMessage`: Full email with subject, body, sender, recipients, dates, etc.
@@ -107,7 +107,8 @@
 - **Implementation details**:
   - Uses IMAP for reading emails with proper MIME parsing
   - Uses SMTP for sending with STARTTLS encryption
-  - `change_key` field now stores IMAP sequence number (needed for get_email and delete)
+  - `change_key` field stores folder and IMAP sequence number (format: "folder:seqnum")
+  - `delete_email()` selects folder in read-write mode before deletion (fixed 2025-11-27)
   - Folder IDs are hashes of folder names (IMAP doesn't have native IDs)
   - Email IDs are hashes of Message-ID headers
 - **Benefits over OWA API**:

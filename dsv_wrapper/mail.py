@@ -473,9 +473,7 @@ class MailClient:
             emails = []
             for msg_id in msg_ids:
                 # Fetch headers only (not body)
-                status, data = self._imap.fetch(
-                    msg_id, "(FLAGS BODY.PEEK[HEADER] INTERNALDATE)"
-                )
+                status, data = self._imap.fetch(msg_id, "(FLAGS BODY.PEEK[HEADER] INTERNALDATE)")
                 if status != "OK" or not data or not data[0]:
                     continue
 
@@ -513,7 +511,8 @@ class MailClient:
                     emails.append(
                         EmailMessage(
                             id=email_id,
-                            change_key=msg_id.decode(),  # Use IMAP sequence number as change_key
+                            # Store folder:seqnum so delete_email knows which folder to select
+                            change_key=f"{imap_folder}:{msg_id.decode()}",
                             subject=_decode_header_value(msg.get("Subject", "")),
                             body="",  # Don't fetch body in list view
                             body_type=BodyType.TEXT,
@@ -542,7 +541,7 @@ class MailClient:
 
         Args:
             message_id: The email message ID (hash from get_emails)
-            change_key: IMAP sequence number (from get_emails change_key field)
+            change_key: Change key from get_emails (format: "folder:seqnum")
             body_type: Preferred body format (Text or HTML)
 
         Returns:
@@ -552,11 +551,26 @@ class MailClient:
             raise NetworkError("IMAP not connected")
 
         if not change_key:
-            raise ParseError("change_key (IMAP sequence number) is required")
+            raise ParseError("change_key is required")
+
+        # Parse change_key to extract folder and sequence number
+        if ":" in change_key:
+            folder, seq_num = change_key.split(":", 1)
+        else:
+            # Fallback for old format (just sequence number)
+            seq_num = change_key
+            folder = None
+
+        # Select folder if specified (in readonly mode for get_email)
+        if folder:
+            try:
+                self._imap.select(folder, readonly=True)
+            except imaplib.IMAP4.error as e:
+                raise ParseError(f"Failed to select folder {folder}: {e}") from e
 
         try:
-            # Fetch full message using the sequence number (change_key)
-            status, data = self._imap.fetch(change_key.encode(), "(FLAGS RFC822)")
+            # Fetch full message using the sequence number
+            status, data = self._imap.fetch(seq_num.encode(), "(FLAGS RFC822)")
             if status != "OK" or not data or not data[0]:
                 raise ParseError(f"Failed to fetch email: {message_id}")
 
@@ -606,18 +620,15 @@ class MailClient:
         except imaplib.IMAP4.error as e:
             raise ParseError(f"IMAP error fetching email: {e}") from e
 
-    def delete_email(
-        self, change_key: str, permanent: bool = False, folder_name: str = "inbox"
-    ) -> None:
-        """Delete an email using its IMAP sequence number.
+    def delete_email(self, change_key: str, permanent: bool = False) -> None:
+        """Delete an email using its change key.
 
         Note: Use the change_key field from EmailMessage returned by get_emails().
-        The change_key contains the IMAP sequence number needed for deletion.
+        The change_key contains the folder and IMAP sequence number.
 
         Args:
-            change_key: The IMAP sequence number from EmailMessage.change_key field.
+            change_key: Change key from EmailMessage (format: "folder:seqnum")
             permanent: If True, permanently delete. If False, move to Deleted Items.
-            folder_name: The folder containing the email ('inbox', 'sentitems', etc.)
 
         Raises:
             NetworkError: If IMAP is not connected.
@@ -627,29 +638,40 @@ class MailClient:
         if not self._imap:
             raise NetworkError("IMAP not connected")
 
-        if not change_key or not change_key.isdigit():
+        if not change_key:
             raise ValidationError(
-                "delete_email requires a valid change_key (IMAP sequence number). "
+                "delete_email requires a valid change_key. "
                 "Use the change_key field from EmailMessage returned by get_emails()."
             )
 
-        try:
-            # Select the folder first - sequence numbers are folder-specific
-            imap_folder = self._get_imap_folder(folder_name)
-            status, _ = self._imap.select(imap_folder)
-            if status != "OK":
-                raise ParseError(f"Failed to select folder: {imap_folder}")
+        # Parse change_key to extract folder and sequence number
+        if ":" in change_key:
+            folder, seq_num = change_key.split(":", 1)
+        else:
+            # Fallback for old format (just sequence number, assume current folder)
+            seq_num = change_key
+            folder = None
 
-            seq_num = change_key.encode()  # IMAP expects bytes
+        if not seq_num.isdigit():
+            raise ValidationError(f"Invalid change_key format: {change_key}")
+
+        try:
+            # Select the folder in read-write mode (required for delete operations)
+            if folder:
+                status, data = self._imap.select(folder, readonly=False)
+                if status != "OK":
+                    raise ParseError(f"Failed to select folder {folder}")
+
+            seq_num_bytes = seq_num.encode()  # IMAP expects bytes
             if permanent:
                 # Mark as deleted and expunge
-                self._imap.store(seq_num, "+FLAGS", "(\\Deleted)")
+                self._imap.store(seq_num_bytes, "+FLAGS", "(\\Deleted)")
                 self._imap.expunge()
             else:
                 # Move to deleted items
                 deleted_folder = self._get_imap_folder("deleteditems")
-                self._imap.copy(seq_num, deleted_folder)
-                self._imap.store(seq_num, "+FLAGS", "(\\Deleted)")
+                self._imap.copy(seq_num_bytes, deleted_folder)
+                self._imap.store(seq_num_bytes, "+FLAGS", "(\\Deleted)")
                 self._imap.expunge()
         except imaplib.IMAP4.error as e:
             raise ParseError(f"Failed to delete email: {e}") from e
@@ -740,17 +762,15 @@ class AsyncMailClient:
             self._sync_client.get_email, message_id, change_key, body_type
         )
 
-    async def delete_email(
-        self, change_key: str, permanent: bool = False, folder_name: str = "inbox"
-    ) -> None:
-        """Delete an email using its IMAP sequence number.
+    async def delete_email(self, change_key: str, permanent: bool = False) -> None:
+        """Delete an email using its change key.
 
         Note: Use the change_key field from EmailMessage returned by get_emails().
+        The change_key contains the folder and IMAP sequence number.
 
         Args:
-            change_key: The IMAP sequence number from EmailMessage.change_key field.
+            change_key: Change key from EmailMessage (format: "folder:seqnum")
             permanent: If True, permanently delete. If False, move to Deleted Items.
-            folder_name: The folder containing the email ('inbox', 'sentitems', etc.)
 
         Raises:
             NetworkError: If IMAP is not connected.
@@ -759,6 +779,4 @@ class AsyncMailClient:
         """
         if not self._sync_client:
             raise NetworkError("Client not initialized")
-        await asyncio.to_thread(
-            self._sync_client.delete_email, change_key, permanent, folder_name
-        )
+        await asyncio.to_thread(self._sync_client.delete_email, change_key, permanent)
