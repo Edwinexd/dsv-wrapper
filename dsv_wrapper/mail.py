@@ -1,12 +1,27 @@
-"""Mail client for SU webmail (mail.su.se) via OWA API."""
+"""Mail client for SU webmail (ebox.su.se) via standard IMAP/SMTP protocols.
+
+This implementation uses standard IMAP (port 993/SSL) and SMTP (port 587/STARTTLS)
+instead of the fragile OWA JSON API.
+"""
 
 import asyncio
+import email
+import email.utils
+import hashlib
+import html
+import imaplib
 import logging
-from datetime import datetime
+import os
+import re
+import smtplib
+import ssl
+from datetime import UTC, datetime
+from email.header import decode_header
+from email.message import EmailMessage as StdEmailMessage
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 
-import httpx
-
-from .exceptions import AuthenticationError, NetworkError, ParseError
+from .exceptions import AuthenticationError, NetworkError, ParseError, ValidationError
 from .models.mail import (
     BodyType,
     EmailAddress,
@@ -15,318 +30,263 @@ from .models.mail import (
     MailFolder,
     SendEmailResult,
 )
-from .utils import extract_attr, parse_html
 
 logger = logging.getLogger(__name__)
 
-# Browser-like headers required for OWA authentication
-_USER_AGENT = (
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"
-)
-_BROWSER_HEADERS = {
-    "User-Agent": _USER_AGENT,
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.9,sv;q=0.8",
-    "Accept-Encoding": "gzip, deflate, br",
-    "Connection": "keep-alive",
-    "Upgrade-Insecure-Requests": "1",
-}
+# ebox.su.se server configuration
+_IMAP_HOST = "ebox.su.se"
+_IMAP_PORT = 993
+_SMTP_HOST = "ebox.su.se"
+_SMTP_PORT = 587
 
-_API_HEADERS = {
-    "Accept": "application/json",
-    "Content-Type": "application/json; charset=utf-8",
-    "X-Requested-With": "XMLHttpRequest",
+# Folder name mapping from OWA-style to IMAP-style
+# Note: Folder names with spaces are quoted for IMAP compatibility
+_FOLDER_MAP = {
+    "inbox": "INBOX",
+    "sentitems": '"Sent Items"',
+    "drafts": "Drafts",
+    "deleteditems": '"Deleted Items"',
+    "junkemail": '"Junk Email"',
+    "outbox": "Outbox",
 }
 
 
-def _parse_datetime(value: str | None) -> datetime | None:
-    """Parse an ISO datetime string from OWA API."""
+def _decode_header_value(value: str | None) -> str:
+    """Decode MIME encoded header value."""
     if not value:
+        return ""
+    decoded_parts = []
+    for part, encoding in decode_header(value):
+        if isinstance(part, bytes):
+            decoded_parts.append(part.decode(encoding or "utf-8", errors="replace"))
+        else:
+            decoded_parts.append(part)
+    return "".join(decoded_parts)
+
+
+def _parse_email_address_string(addr_string: str | None) -> EmailAddress | None:
+    """Parse an email address from a header string like 'Name <email@example.com>'."""
+    if not addr_string:
         return None
-
-    try:
-        # Handle Z suffix
-        if value.endswith("Z"):
-            value = value[:-1] + "+00:00"
-        return datetime.fromisoformat(value)
-    except ValueError:
+    name, email_addr = email.utils.parseaddr(addr_string)
+    if not email_addr:
         return None
+    return EmailAddress(email=email_addr, name=_decode_header_value(name))
 
 
-def _parse_email_address(data: dict | None) -> EmailAddress | None:
-    """Parse an EmailAddress from OWA API response."""
-    if not data:
+def _parse_address_list(header_value: str | None) -> list[EmailAddress]:
+    """Parse a comma-separated list of email addresses."""
+    if not header_value:
+        return []
+    addresses = email.utils.getaddresses([header_value])
+    result = []
+    for name, email_addr in addresses:
+        if email_addr:
+            result.append(EmailAddress(email=email_addr, name=_decode_header_value(name)))
+    return result
+
+
+def _parse_imap_date(date_string: str | None) -> datetime | None:
+    """Parse date from email headers."""
+    if not date_string:
         return None
-    mailbox = data.get("Mailbox", data)
-    email = mailbox.get("EmailAddress", "")
-    name = mailbox.get("Name", "")
-    if not email:
-        return None
-    return EmailAddress(email=email, name=name)
+    parsed = email.utils.parsedate_to_datetime(date_string)
+    return parsed
 
 
-def _parse_email_message(data: dict, include_body: bool = False) -> EmailMessage:
-    """Parse an EmailMessage from OWA API response."""
-    item_id = data.get("ItemId", {})
-    sender = _parse_email_address(data.get("From"))
-    recipients = [
-        addr
-        for addr in (_parse_email_address(r) for r in data.get("ToRecipients", []))
-        if addr is not None
-    ]
-    cc_recipients = [
-        addr
-        for addr in (_parse_email_address(r) for r in data.get("CcRecipients", []))
-        if addr is not None
-    ]
+def _get_email_body(msg: StdEmailMessage, body_type: BodyType) -> tuple[str, BodyType]:
+    """Extract body content from email message."""
+    # For multipart messages, find the right part
+    if msg.is_multipart():
+        text_body = ""
+        html_body = ""
+        for part in msg.walk():
+            content_type = part.get_content_type()
+            if content_type == "text/plain":
+                payload = part.get_payload(decode=True)
+                if payload:
+                    charset = part.get_content_charset() or "utf-8"
+                    text_body = payload.decode(charset, errors="replace")
+            elif content_type == "text/html":
+                payload = part.get_payload(decode=True)
+                if payload:
+                    charset = part.get_content_charset() or "utf-8"
+                    html_body = payload.decode(charset, errors="replace")
 
-    body_data = data.get("Body", {})
-    body = body_data.get("Value", "") if include_body else ""
-    body_type_str = body_data.get("BodyType", "Text")
-    body_type = BodyType.HTML if body_type_str == "HTML" else BodyType.TEXT
+        # Return preferred body type if available
+        if body_type == BodyType.HTML and html_body:
+            return html_body, BodyType.HTML
+        if text_body:
+            return text_body, BodyType.TEXT
+        if html_body:
+            return html_body, BodyType.HTML
+        return "", BodyType.TEXT
+    else:
+        # Single-part message
+        payload = msg.get_payload(decode=True)
+        if not payload:
+            return "", BodyType.TEXT
+        charset = msg.get_content_charset() or "utf-8"
+        content = payload.decode(charset, errors="replace")
+        content_type = msg.get_content_type()
+        if content_type == "text/html":
+            return content, BodyType.HTML
+        return content, BodyType.TEXT
 
-    importance_str = data.get("Importance", "Normal")
-    importance = (
-        Importance.HIGH
-        if importance_str == "High"
-        else (Importance.LOW if importance_str == "Low" else Importance.NORMAL)
+
+def _parse_importance(headers: StdEmailMessage) -> Importance:
+    """Parse importance/priority from email headers."""
+    importance = headers.get("Importance", "").lower()
+    priority = headers.get("X-Priority", "")
+
+    if importance == "high" or priority == "1":
+        return Importance.HIGH
+    if importance == "low" or priority == "5":
+        return Importance.LOW
+    return Importance.NORMAL
+
+
+def _has_attachments(msg: StdEmailMessage) -> bool:
+    """Check if message has attachments."""
+    if not msg.is_multipart():
+        return False
+    for part in msg.walk():
+        content_disposition = part.get("Content-Disposition", "")
+        if "attachment" in content_disposition:
+            return True
+    return False
+
+
+def _html_to_plain_text(html_content: str) -> str:
+    """Convert HTML content to plain text.
+
+    This is a simple conversion that strips HTML tags and decodes entities.
+    For more complex HTML, the output may not be perfect but will be readable.
+    """
+    # Remove script and style blocks
+    text = re.sub(
+        r"<(script|style)[^>]*>.*?</\1>", "", html_content, flags=re.IGNORECASE | re.DOTALL
     )
 
-    # DateTimeReceived not always returned in list view, fall back to DateTimeSent
-    received_at = _parse_datetime(data.get("DateTimeReceived"))
-    if not received_at:
-        received_at = _parse_datetime(data.get("DateTimeSent")) or _parse_datetime(
-            data.get("DateTimeCreated")
-        )
+    # Replace common block elements with newlines
+    text = re.sub(r"<br\s*/?>", "\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"</p>", "\n\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"</div>", "\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"</h[1-6]>", "\n\n", text, flags=re.IGNORECASE)
 
-    return EmailMessage(
-        id=item_id.get("Id", ""),
-        change_key=item_id.get("ChangeKey", ""),
-        subject=data.get("Subject", ""),
-        body=body,
-        body_type=body_type,
-        sender=sender,
-        recipients=recipients,
-        cc_recipients=cc_recipients,
-        received_at=received_at,
-        sent_at=_parse_datetime(data.get("DateTimeSent")),
-        is_read=data.get("IsRead", False),
-        has_attachments=data.get("HasAttachments", False),
-        importance=importance,
-    )
+    # Remove all remaining HTML tags
+    text = re.sub(r"<[^>]+>", "", text)
 
+    # Decode HTML entities
+    text = html.unescape(text)
 
-def _follow_redirects(
-    client: httpx.Client, response: httpx.Response, max_redirects: int = 15
-) -> httpx.Response:
-    """Follow HTTP redirects manually."""
-    for _ in range(max_redirects):
-        if response.status_code not in (301, 302, 303):
-            break
-        location = response.headers.get("Location")
-        if not location:
-            break
-        if location.startswith("/"):
-            base = f"{response.url.scheme}://{response.url.host}"
-            location = base + location
-        response = client.get(location)
-    return response
+    # Normalize whitespace
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    text = text.strip()
+
+    return text
 
 
 class MailClient:
-    """Synchronous client for SU webmail (mail.su.se) via OWA API.
+    """Synchronous client for SU webmail (ebox.su.se) via IMAP/SMTP.
 
-    This client authenticates through the SU Shibboleth SSO system and uses
-    the Outlook Web App (OWA) JSON API to send emails.
+    This client uses IMAP (port 993/SSL) for reading emails and
+    SMTP (port 587/STARTTLS) for sending emails.
 
-    Note: Due to OWA JSON API limitations, listing emails is not supported.
-    You can get folder statistics and send emails.
+    Authentication uses the Windows AD domain format: winadsu\\username
 
-    Note: If you have "Undo Send" enabled in OWA settings, sent emails will
-    appear in drafts for 30 seconds before being actually sent.
+    For function accounts (funktionskonto), use the function account's email
+    address as the `email_address` parameter. Authentication is still done
+    with your personal username and password.
     """
 
-    def __init__(self, username: str, password: str, timeout: int = 30):
+    def __init__(
+        self,
+        username: str | None = None,
+        password: str | None = None,
+        email_address: str | None = None,
+        timeout: int = 30,
+    ):
         """Initialize the mail client.
 
         Args:
-            username: SU username (e.g., 'abcd1234')
-            password: SU password
+            username: SU username (default: read from SU_USERNAME env var)
+            password: SU password (default: read from SU_PASSWORD env var)
+            email_address: The email address to use as the sender address
+                (default: read from SU_EMAIL env var).
+                For personal accounts, use your personal email address.
+                For function accounts (funktionskonto), use the function account's email address.
             timeout: Request timeout in seconds
+
+        Raises:
+            AuthenticationError: If credentials or email not provided and not in env vars
         """
-        self._username = username
-        self._password = password
+        # Get credentials from env vars if not provided
+        self._username = username or os.environ.get("SU_USERNAME")
+        self._password = password or os.environ.get("SU_PASSWORD")
+        self._email_address = email_address or os.environ.get("SU_EMAIL")
+
+        if not self._username or not self._password:
+            raise AuthenticationError(
+                "Username and password must be provided either as arguments or "
+                "via SU_USERNAME and SU_PASSWORD environment variables"
+            )
+        if not self._email_address:
+            raise AuthenticationError(
+                "Email address must be provided either as an argument or "
+                "via SU_EMAIL environment variable"
+            )
+
         self._timeout = timeout
-        self._client: httpx.Client | None = None
-        self._owa_base: str | None = None
-        self._canary: str | None = None
+        self._imap: imaplib.IMAP4_SSL | None = None
+        self._user_email: str | None = None
 
     def __enter__(self) -> "MailClient":
-        """Enter context manager and authenticate."""
-        self._client = httpx.Client(
-            headers=_BROWSER_HEADERS,
-            follow_redirects=False,
-            timeout=self._timeout,
-        )
-        self._authenticate()
+        """Enter context manager and connect to IMAP server."""
+        self._connect_imap()
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
-        """Exit context manager and close client."""
-        if self._client:
-            self._client.close()
-            self._client = None
+        """Exit context manager and close connections."""
+        self._disconnect_imap()
 
-    def _authenticate(self) -> None:
-        """Perform SSO authentication to OWA."""
-        if not self._client:
-            raise NetworkError("Client not initialized")
-
-        logger.debug("Starting mail.su.se SSO authentication")
-
-        # Step 1: Start SSO flow
-        response = self._client.get("https://mail.su.se/owa/")
-        response = _follow_redirects(self._client, response)
-        soup = parse_html(response.text)
-
-        # Step 2: Handle localStorage form (Shibboleth)
-        form = soup.find("form")
-        if form:
-            action = extract_attr(form, "action")
-            if action and "execution" in action:
-                form_data = {}
-                for inp in form.find_all("input"):
-                    name = inp.get("name")
-                    if name:
-                        form_data[name] = inp.get("value", "")
-                form_data["_eventId_proceed"] = ""
-
-                if action.startswith("/"):
-                    action = "https://idp.it.su.se" + action
-
-                response = self._client.post(action, data=form_data)
-                response = _follow_redirects(self._client, response)
-                soup = parse_html(response.text)
-
-        # Step 3: Submit login credentials
-        login_form = soup.find("form", {"id": "login"})
-        if not login_form:
-            login_form = soup.find("form")
-
-        if login_form and "j_username" in str(login_form):
-            action = extract_attr(login_form, "action")
-            form_data = {}
-            for inp in login_form.find_all("input"):
-                name = inp.get("name")
-                if name:
-                    form_data[name] = inp.get("value", "")
-
-            form_data["j_username"] = self._username
-            form_data["j_password"] = self._password
-            form_data["_eventId_proceed"] = ""
-            form_data.pop("_eventId_authn/SPNEGO", None)
-            form_data.pop("_eventId_trySPNEGO", None)
-
-            if action and action.startswith("/"):
-                action = "https://idp.it.su.se" + action
-
-            response = self._client.post(action, data=form_data)
-            soup = parse_html(response.text)
-
-            # Check for login error
-            error = soup.find("p", class_="form-error")
-            if error:
-                raise AuthenticationError(f"Login failed: {error.get_text().strip()}")
-
-            response = _follow_redirects(self._client, response)
-            soup = parse_html(response.text)
-
-        # Step 4: Handle SAML/WS-Fed forms until we reach OWA
-        owa_reached = False
-        for _ in range(10):
-            form = soup.find("form", method="post")
-            if not form:
-                form = soup.find("form")
-            if not form:
-                break
-
-            form_str = str(form)
-            if "SAMLResponse" in form_str or "wresult" in form_str or "wa=" in form_str:
-                action = extract_attr(form, "action")
-                form_data = {}
-                for inp in form.find_all("input"):
-                    name = inp.get("name")
-                    if name:
-                        form_data[name] = inp.get("value", "")
-
-                headers = {
-                    **_BROWSER_HEADERS,
-                    "Content-Type": "application/x-www-form-urlencoded",
-                    "Origin": f"{response.url.scheme}://{response.url.host}",
-                    "Referer": str(response.url),
-                }
-                response = self._client.post(action, data=form_data, headers=headers)
-
-                # Follow any redirects (including 302)
-                if response.status_code in (301, 302, 303):
-                    response = _follow_redirects(self._client, response)
-
-                soup = parse_html(response.text)
-
-                # Check if we've reached OWA
-                url_str = str(response.url).lower()
-                if ("owa" in url_str or "ebox" in url_str) and response.status_code == 200:
-                    title = soup.find("title")
-                    title_text = title.get_text() if title else ""
-                    if title and "Working" not in title_text:
-                        owa_reached = True
-                        break
-            else:
-                break
-
-        if not owa_reached:
-            raise AuthenticationError("Failed to complete OWA authentication")
-
-        # Get OWA base URL and canary token
-        self._owa_base = f"{response.url.scheme}://{response.url.host}"
-        self._canary = None
-        for cookie in self._client.cookies.jar:
-            if cookie.name == "X-OWA-CANARY":
-                self._canary = cookie.value
-                break
-
-        if not self._canary:
-            raise AuthenticationError("Failed to get OWA canary token")
-
-        logger.info("Successfully authenticated to mail.su.se")
-
-    def _api_request(self, action: str, body: dict, action_id: int = -1) -> dict:
-        """Make an OWA API request."""
-        if not self._client or not self._owa_base or not self._canary:
-            raise NetworkError("Not authenticated")
-
-        headers = {
-            **_BROWSER_HEADERS,
-            **_API_HEADERS,
-            "X-OWA-CANARY": self._canary,
-            "X-OWA-ActionName": action,
-            "Action": action,
-        }
-
-        url = f"{self._owa_base}/owa/service.svc?action={action}&ID={action_id}&AC=1"
-        response = self._client.post(url, headers=headers, json=body)
-
-        if response.status_code == 440:
-            raise AuthenticationError("Session expired")
-        if response.status_code != 200:
-            logger.error(f"API request failed: {response.text[:500]}")
-            raise NetworkError(f"API request failed with status {response.status_code}")
-
+    def _connect_imap(self) -> None:
+        """Connect and authenticate to IMAP server."""
         try:
-            return response.json()
-        except ValueError as e:
-            raise ParseError(f"Failed to parse API response: {e}") from e
+            context = ssl.create_default_context()
+            self._imap = imaplib.IMAP4_SSL(
+                _IMAP_HOST, _IMAP_PORT, ssl_context=context, timeout=self._timeout
+            )
+
+            # Use Windows AD format for authentication
+            login_username = f"winadsu\\{self._username}"
+            self._imap.login(login_username, self._password)
+
+            # Use the provided email address
+            self._user_email = self._email_address
+
+            logger.info("Successfully connected to ebox.su.se IMAP")
+
+        except imaplib.IMAP4.error as e:
+            error_msg = str(e)
+            if "authentication failed" in error_msg.lower() or "login failed" in error_msg.lower():
+                raise AuthenticationError(f"IMAP login failed: {error_msg}") from e
+            raise NetworkError(f"IMAP connection failed: {error_msg}") from e
+        except (OSError, TimeoutError) as e:
+            raise NetworkError(f"Failed to connect to IMAP server: {e}") from e
+
+    def _disconnect_imap(self) -> None:
+        """Disconnect from IMAP server."""
+        if self._imap:
+            try:
+                self._imap.logout()
+            except (imaplib.IMAP4.error, OSError):
+                pass  # Ignore errors during logout
+            self._imap = None
+
+    def _get_imap_folder(self, folder_name: str) -> str:
+        """Convert OWA-style folder name to IMAP folder name."""
+        return _FOLDER_MAP.get(folder_name.lower(), folder_name)
 
     def send_email(
         self,
@@ -337,10 +297,7 @@ class MailClient:
         cc: list[str] | None = None,
         save_to_sent: bool = True,
     ) -> SendEmailResult:
-        """Send an email.
-
-        Note: If you have "Undo Send" enabled in OWA settings, the email will
-        appear in drafts for the configured delay before being sent.
+        """Send an email via SMTP.
 
         Args:
             to: Recipient email address(es)
@@ -348,7 +305,7 @@ class MailClient:
             body: Email body content
             body_type: Body content type (Text or HTML)
             cc: CC recipient email address(es)
-            save_to_sent: Whether to save a copy to Sent Items
+            save_to_sent: Whether to save a copy to Sent Items (via IMAP APPEND)
 
         Returns:
             SendEmailResult with success status and message ID
@@ -362,186 +319,109 @@ class MailClient:
             cc = [cc]
 
         try:
-            # Step 1: Create draft without recipients
-            # (OWA API doesn't save recipients in CreateItem, must use UpdateItem)
-            data = self._api_request(
-                "CreateItem",
-                {
-                    "Header": {"RequestServerVersion": "Exchange2013"},
-                    "Body": {
-                        "MessageDisposition": "SaveOnly",
-                        "SavedItemFolderId": {
-                            "__type": "TargetFolderId:#Exchange",
-                            "BaseFolderId": {
-                                "__type": "DistinguishedFolderId:#Exchange",
-                                "Id": "drafts",
-                            },
-                        },
-                        "Items": [
-                            {
-                                "ItemClass": "IPM.Note",
-                                "Subject": subject,
-                                "Body": {"BodyType": body_type.value, "Value": body},
-                            }
-                        ],
-                    },
-                },
-                action_id=-2,
-            )
+            # Create email message
+            if body_type == BodyType.HTML:
+                msg = MIMEMultipart("alternative")
+                # Add plain text version (converted from HTML)
+                plain_text = _html_to_plain_text(body)
+                text_part = MIMEText(plain_text, "plain", "utf-8")
+                html_part = MIMEText(body, "html", "utf-8")
+                msg.attach(text_part)
+                msg.attach(html_part)
+            else:
+                msg = MIMEText(body, "plain", "utf-8")
 
-            items = data.get("Body", {}).get("ResponseMessages", {}).get("Items", [])
-            if not items:
-                return SendEmailResult(success=False, error="No response from CreateItem")
-
-            item = items[0]
-            if item.get("ResponseCode") != "NoError":
-                return SendEmailResult(success=False, error=item.get("ResponseCode"))
-
-            created = item.get("Items", [{}])[0]
-            item_id = created.get("ItemId", {}).get("Id")
-            change_key = created.get("ItemId", {}).get("ChangeKey")
-
-            if not item_id:
-                return SendEmailResult(success=False, error="No item ID returned")
-
-            # Step 2: Update draft to add recipients
-            updates = [
-                {
-                    "__type": "SetItemField:#Exchange",
-                    "Path": {"__type": "PropertyUri:#Exchange", "FieldURI": "ToRecipients"},
-                    "Item": {
-                        "__type": "Message:#Exchange",
-                        "ToRecipients": [{"EmailAddress": addr} for addr in to],
-                    },
-                }
-            ]
+            # Set headers
+            msg["From"] = self._user_email
+            msg["To"] = ", ".join(to)
+            msg["Subject"] = subject
 
             if cc:
-                updates.append(
-                    {
-                        "__type": "SetItemField:#Exchange",
-                        "Path": {"__type": "PropertyUri:#Exchange", "FieldURI": "CcRecipients"},
-                        "Item": {
-                            "__type": "Message:#Exchange",
-                            "CcRecipients": [{"EmailAddress": addr} for addr in cc],
-                        },
-                    }
-                )
+                msg["Cc"] = ", ".join(cc)
 
-            data = self._api_request(
-                "UpdateItem",
-                {
-                    "Header": {"RequestServerVersion": "Exchange2013"},
-                    "Body": {
-                        "MessageDisposition": "SaveOnly",
-                        "ConflictResolution": "AlwaysOverwrite",
-                        "ItemChanges": [
-                            {
-                                "ItemId": {
-                                    "__type": "ItemId:#Exchange",
-                                    "Id": item_id,
-                                    "ChangeKey": change_key,
-                                },
-                                "Updates": updates,
-                            }
-                        ],
-                    },
-                },
-                action_id=-3,
-            )
+            # Add Message-ID
+            msg_id = email.utils.make_msgid(domain="dsv.su.se")
+            msg["Message-ID"] = msg_id
+            msg["Date"] = email.utils.formatdate(localtime=True)
 
-            items = data.get("Body", {}).get("ResponseMessages", {}).get("Items", [])
-            if not items or items[0].get("ResponseCode") != "NoError":
-                err_code = items[0].get("ResponseCode") if items else "no response"
-                return SendEmailResult(success=False, error=f"UpdateItem failed: {err_code}")
+            # Connect to SMTP and send
+            context = ssl.create_default_context()
+            with smtplib.SMTP(_SMTP_HOST, _SMTP_PORT, timeout=self._timeout) as smtp:
+                smtp.starttls(context=context)
+                login_username = f"winadsu\\{self._username}"
+                smtp.login(login_username, self._password)
 
-            # Get updated change key
-            updated = items[0].get("Items", [{}])[0]
-            change_key = updated.get("ItemId", {}).get("ChangeKey")
+                all_recipients = to + cc
+                smtp.sendmail(self._user_email, all_recipients, msg.as_string())
 
-            # Step 3: Send the message
-            send_body: dict = {
-                "ItemIds": [
-                    {
-                        "__type": "ItemId:#Exchange",
-                        "Id": item_id,
-                        "ChangeKey": change_key,
-                    }
-                ],
-            }
+            # Optionally save to Sent Items via IMAP
+            if save_to_sent and self._imap:
+                try:
+                    sent_folder = self._get_imap_folder("sentitems")
+                    # Add to sent folder with current time (email was just sent)
+                    sent_time = imaplib.Time2Internaldate(datetime.now(tz=UTC))
+                    # Flags must be in parentheses for IMAP APPEND
+                    self._imap.append(sent_folder, "(\\Seen)", sent_time, msg.as_bytes())
+                except imaplib.IMAP4.error as e:
+                    logger.warning(f"Failed to save to Sent Items: {e}")
+                    # Don't fail the send if saving to sent fails
 
-            if save_to_sent:
-                send_body["SaveItemToFolder"] = True
-                send_body["SavedItemFolderId"] = {
-                    "__type": "TargetFolderId:#Exchange",
-                    "BaseFolderId": {
-                        "__type": "DistinguishedFolderId:#Exchange",
-                        "Id": "sentitems",
-                    },
-                }
+            # Generate a pseudo message ID for the result
+            # (SMTP doesn't return a server-side ID)
+            result_id = hashlib.sha256(msg_id.encode()).hexdigest()[:32]
 
-            data = self._api_request(
-                "SendItem",
-                {
-                    "Header": {"RequestServerVersion": "Exchange2013"},
-                    "Body": send_body,
-                },
-                action_id=-4,
-            )
+            return SendEmailResult(success=True, message_id=result_id)
 
-            items = data.get("Body", {}).get("ResponseMessages", {}).get("Items", [])
-            if not items:
-                return SendEmailResult(success=False, error="No response from SendItem")
-
-            item = items[0]
-            if item.get("ResponseCode") != "NoError":
-                err = f"SendItem failed: {item.get('ResponseCode')}"
-                return SendEmailResult(success=False, error=err)
-
-            return SendEmailResult(success=True, message_id=item_id)
-
-        except (NetworkError, ParseError) as e:
-            return SendEmailResult(success=False, error=str(e))
+        except smtplib.SMTPAuthenticationError as e:
+            return SendEmailResult(success=False, error=f"SMTP authentication failed: {e}")
+        except smtplib.SMTPException as e:
+            return SendEmailResult(success=False, error=f"SMTP error: {e}")
+        except (OSError, TimeoutError) as e:
+            return SendEmailResult(success=False, error=f"Network error: {e}")
 
     def get_folder(self, folder_name: str = "inbox") -> MailFolder:
         """Get folder information.
 
         Args:
-            folder_name: Distinguished folder name ('inbox', 'drafts', 'sentitems', etc.)
+            folder_name: Folder name ('inbox', 'drafts', 'sentitems', etc.)
 
         Returns:
             MailFolder with folder details
         """
-        data = self._api_request(
-            "GetFolder",
-            {
-                "Header": {"RequestServerVersion": "Exchange2013"},
-                "Body": {
-                    "FolderShape": {"BaseShape": "Default"},
-                    "FolderIds": [{"__type": "DistinguishedFolderId:#Exchange", "Id": folder_name}],
-                },
-            },
-        )
+        if not self._imap:
+            raise NetworkError("IMAP not connected")
 
-        items = data.get("Body", {}).get("ResponseMessages", {}).get("Items", [])
-        if not items:
-            raise ParseError("No folder response")
+        imap_folder = self._get_imap_folder(folder_name)
 
-        item = items[0]
-        if item.get("ResponseCode") != "NoError":
-            raise ParseError(f"GetFolder failed: {item.get('ResponseCode')}")
+        try:
+            # Select folder to get counts
+            status, data = self._imap.select(imap_folder, readonly=True)
+            if status != "OK":
+                raise ParseError(f"Failed to select folder: {imap_folder}")
 
-        folders = item.get("Folders", [])
-        if not folders:
-            raise ParseError("No folder data")
+            # Get total count
+            total_count = int(data[0].decode())
 
-        folder = folders[0]
-        return MailFolder(
-            id=folder.get("FolderId", {}).get("Id", ""),
-            name=folder.get("DisplayName", folder_name),
-            total_count=folder.get("TotalCount", 0),
-            unread_count=folder.get("UnreadCount", 0),
-        )
+            # Get unread count
+            status, data = self._imap.search(None, "UNSEEN")
+            if status != "OK":
+                unread_count = 0
+            else:
+                unread_ids = data[0].split()
+                unread_count = len(unread_ids)
+
+            # Generate folder ID (IMAP doesn't have IDs, use hash of name)
+            folder_id = hashlib.sha256(imap_folder.encode()).hexdigest()[:32]
+
+            return MailFolder(
+                id=folder_id,
+                name=imap_folder,
+                total_count=total_count,
+                unread_count=unread_count,
+            )
+
+        except imaplib.IMAP4.error as e:
+            raise ParseError(f"IMAP error getting folder: {e}") from e
 
     def get_emails(self, folder_name: str = "inbox", limit: int = 50) -> list[EmailMessage]:
         """Get emails from a folder.
@@ -550,45 +430,109 @@ class MailClient:
         to retrieve full email content.
 
         Args:
-            folder_name: Distinguished folder name ('inbox', 'drafts', 'sentitems', etc.)
+            folder_name: Folder name ('inbox', 'drafts', 'sentitems', etc.)
             limit: Maximum number of emails to return (default 50)
 
         Returns:
             List of EmailMessage objects (without body content)
         """
-        # First get the folder ID
-        folder = self.get_folder(folder_name)
+        if not self._imap:
+            raise NetworkError("IMAP not connected")
 
-        # Then list items using the actual folder ID
-        data = self._api_request(
-            "FindItem",
-            {
-                "Header": {"RequestServerVersion": "Exchange2013"},
-                "Body": {
-                    "ItemShape": {"BaseShape": "Default"},
-                    "ParentFolderIds": [{"__type": "FolderId:#Exchange", "Id": folder.id}],
-                    "Traversal": "Shallow",
-                },
-            },
-        )
+        imap_folder = self._get_imap_folder(folder_name)
 
-        items = data.get("Body", {}).get("ResponseMessages", {}).get("Items", [])
-        if not items:
-            return []
+        try:
+            status, data = self._imap.select(imap_folder, readonly=True)
+            if status != "OK":
+                raise ParseError(f"Failed to select folder: {imap_folder}")
 
-        item = items[0]
-        if item.get("ResponseCode") != "NoError":
-            raise ParseError(f"FindItem failed: {item.get('ResponseCode')}")
+            # Get all message IDs (try SORT first, fallback to SEARCH)
+            msg_ids = []
+            try:
+                # SORT is not supported by all IMAP servers (e.g., Exchange)
+                status, data = self._imap.sort("(REVERSE DATE)", "UTF-8", "ALL")
+                if status == "OK":
+                    msg_ids = data[0].split()
+            except imaplib.IMAP4.error:
+                pass  # SORT not supported, fall through to SEARCH
 
-        root = item.get("RootFolder", {})
-        email_items = root.get("Items", [])
+            if not msg_ids:
+                # Fallback to SEARCH (results won't be sorted)
+                status, data = self._imap.search(None, "ALL")
+                if status == "OK" and data[0]:
+                    msg_ids = data[0].split()
+                    # Reverse to get newest first (higher sequence numbers = newer)
+                    msg_ids = list(reversed(msg_ids))
 
-        # Parse emails (limit the result)
-        emails = []
-        for email_data in email_items[:limit]:
-            emails.append(_parse_email_message(email_data, include_body=False))
+            if not msg_ids:
+                return []
 
-        return emails
+            # Limit results
+            msg_ids = msg_ids[:limit]
+
+            emails = []
+            for msg_id in msg_ids:
+                # Fetch headers only (not body)
+                status, data = self._imap.fetch(msg_id, "(FLAGS BODY.PEEK[HEADER] INTERNALDATE)")
+                if status != "OK" or not data or not data[0]:
+                    continue
+
+                # Parse the response
+                msg_data = data[0]
+                if isinstance(msg_data, tuple) and len(msg_data) >= 2:
+                    flags_info = msg_data[0].decode()
+                    headers_raw = msg_data[1]
+
+                    # Parse headers
+                    msg = email.message_from_bytes(headers_raw)
+
+                    # Check if read (\\Seen flag)
+                    is_read = b"\\Seen" in flags_info.encode()
+
+                    # Extract date
+                    date_str = msg.get("Date")
+                    received_at = _parse_imap_date(date_str)
+                    sent_at = received_at
+
+                    # Parse sender and recipients
+                    sender = _parse_email_address_string(msg.get("From"))
+                    recipients = _parse_address_list(msg.get("To"))
+                    cc_recipients = _parse_address_list(msg.get("Cc"))
+
+                    # Generate a unique ID from message ID or sequence number
+                    message_id_header = msg.get("Message-ID", "")
+                    if message_id_header:
+                        email_id = hashlib.sha256(message_id_header.encode()).hexdigest()[:32]
+                    else:
+                        email_id = hashlib.sha256(
+                            f"{imap_folder}:{msg_id.decode()}".encode()
+                        ).hexdigest()[:32]
+
+                    emails.append(
+                        EmailMessage(
+                            id=email_id,
+                            # Store folder:seqnum so delete_email knows which folder to select
+                            change_key=f"{imap_folder}:{msg_id.decode()}",
+                            subject=_decode_header_value(msg.get("Subject", "")),
+                            body="",  # Don't fetch body in list view
+                            body_type=BodyType.TEXT,
+                            sender=sender,
+                            recipients=recipients,
+                            cc_recipients=cc_recipients,
+                            received_at=received_at,
+                            sent_at=sent_at,
+                            is_read=is_read,
+                            # has_attachments is False in list view - can't determine from
+                            # headers alone. Use get_email() to get accurate attachment info.
+                            has_attachments=False,
+                            importance=_parse_importance(msg),
+                        )
+                    )
+
+            return emails
+
+        except imaplib.IMAP4.error as e:
+            raise ParseError(f"IMAP error listing emails: {e}") from e
 
     def get_email(
         self, message_id: str, change_key: str = "", body_type: BodyType = BodyType.TEXT
@@ -596,98 +540,181 @@ class MailClient:
         """Get full email content by ID.
 
         Args:
-            message_id: The email message ID
-            change_key: Optional change key (improves performance if provided)
+            message_id: The email message ID (hash from get_emails)
+            change_key: Change key from get_emails (format: "folder:seqnum")
             body_type: Preferred body format (Text or HTML)
 
         Returns:
             EmailMessage with full content including body
         """
-        item_id_obj: dict = {"__type": "ItemId:#Exchange", "Id": message_id}
-        if change_key:
-            item_id_obj["ChangeKey"] = change_key
+        if not self._imap:
+            raise NetworkError("IMAP not connected")
 
-        data = self._api_request(
-            "GetItem",
-            {
-                "Header": {"RequestServerVersion": "Exchange2013"},
-                "Body": {
-                    "ItemShape": {
-                        "BaseShape": "AllProperties",
-                        "BodyType": body_type.value,
-                    },
-                    "ItemIds": [item_id_obj],
-                },
-            },
-        )
+        if not change_key:
+            raise ParseError("change_key is required")
 
-        items = data.get("Body", {}).get("ResponseMessages", {}).get("Items", [])
-        if not items:
-            raise ParseError("No item response")
+        # Parse change_key to extract folder and sequence number
+        if ":" in change_key:
+            folder, seq_num = change_key.split(":", 1)
+        else:
+            # Fallback for old format (just sequence number)
+            seq_num = change_key
+            folder = None
 
-        item = items[0]
-        if item.get("ResponseCode") != "NoError":
-            raise ParseError(f"GetItem failed: {item.get('ResponseCode')}")
+        # Select folder if specified (in readonly mode for get_email)
+        if folder:
+            try:
+                self._imap.select(folder, readonly=True)
+            except imaplib.IMAP4.error as e:
+                raise ParseError(f"Failed to select folder {folder}: {e}") from e
 
-        email_items = item.get("Items", [])
-        if not email_items:
-            raise ParseError("No email data")
+        try:
+            # Fetch full message using the sequence number
+            status, data = self._imap.fetch(seq_num.encode(), "(FLAGS RFC822)")
+            if status != "OK" or not data or not data[0]:
+                raise ParseError(f"Failed to fetch email: {message_id}")
 
-        return _parse_email_message(email_items[0], include_body=True)
+            # Parse the response
+            msg_data = data[0]
+            if not isinstance(msg_data, tuple) or len(msg_data) < 2:
+                raise ParseError("Invalid IMAP response format")
 
-    def delete_email(self, message_id: str, permanent: bool = False) -> bool:
-        """Delete an email by ID.
+            flags_info = msg_data[0].decode()
+            raw_email = msg_data[1]
+
+            # Parse email
+            msg = email.message_from_bytes(raw_email)
+
+            # Check if read
+            is_read = b"\\Seen" in flags_info.encode()
+
+            # Get body
+            body_content, actual_body_type = _get_email_body(msg, body_type)
+
+            # Parse dates
+            date_str = msg.get("Date")
+            received_at = _parse_imap_date(date_str)
+            sent_at = received_at
+
+            # Parse sender and recipients
+            sender = _parse_email_address_string(msg.get("From"))
+            recipients = _parse_address_list(msg.get("To"))
+            cc_recipients = _parse_address_list(msg.get("Cc"))
+
+            return EmailMessage(
+                id=message_id,
+                change_key=change_key,
+                subject=_decode_header_value(msg.get("Subject", "")),
+                body=body_content,
+                body_type=actual_body_type,
+                sender=sender,
+                recipients=recipients,
+                cc_recipients=cc_recipients,
+                received_at=received_at,
+                sent_at=sent_at,
+                is_read=is_read,
+                has_attachments=_has_attachments(msg),
+                importance=_parse_importance(msg),
+            )
+
+        except imaplib.IMAP4.error as e:
+            raise ParseError(f"IMAP error fetching email: {e}") from e
+
+    def delete_email(self, change_key: str, permanent: bool = False) -> None:
+        """Delete an email using its change key.
+
+        Note: Use the change_key field from EmailMessage returned by get_emails().
+        The change_key contains the folder and IMAP sequence number.
 
         Args:
-            message_id: The email message ID to delete
+            change_key: Change key from EmailMessage (format: "folder:seqnum")
             permanent: If True, permanently delete. If False, move to Deleted Items.
 
-        Returns:
-            True if deletion was successful
+        Raises:
+            NetworkError: If IMAP is not connected.
+            ValidationError: If change_key is invalid.
+            ParseError: If the IMAP operation fails.
         """
-        delete_type = "HardDelete" if permanent else "MoveToDeletedItems"
+        if not self._imap:
+            raise NetworkError("IMAP not connected")
 
-        data = self._api_request(
-            "DeleteItem",
-            {
-                "Header": {"RequestServerVersion": "Exchange2013"},
-                "Body": {
-                    "DeleteType": delete_type,
-                    "ItemIds": [{"__type": "ItemId:#Exchange", "Id": message_id}],
-                },
-            },
-        )
+        if not change_key:
+            raise ValidationError(
+                "delete_email requires a valid change_key. "
+                "Use the change_key field from EmailMessage returned by get_emails()."
+            )
 
-        items = data.get("Body", {}).get("ResponseMessages", {}).get("Items", [])
-        if not items:
-            return False
+        # Parse change_key to extract folder and sequence number
+        if ":" in change_key:
+            folder, seq_num = change_key.split(":", 1)
+        else:
+            # Fallback for old format (just sequence number, assume current folder)
+            seq_num = change_key
+            folder = None
 
-        item = items[0]
-        return item.get("ResponseCode") == "NoError"
+        if not seq_num.isdigit():
+            raise ValidationError(f"Invalid change_key format: {change_key}")
+
+        try:
+            # Select the folder in read-write mode (required for delete operations)
+            if folder:
+                status, data = self._imap.select(folder, readonly=False)
+                if status != "OK":
+                    raise ParseError(f"Failed to select folder {folder}")
+
+            seq_num_bytes = seq_num.encode()  # IMAP expects bytes
+            if permanent:
+                # Mark as deleted and expunge
+                self._imap.store(seq_num_bytes, "+FLAGS", "(\\Deleted)")
+                self._imap.expunge()
+            else:
+                # Move to deleted items
+                deleted_folder = self._get_imap_folder("deleteditems")
+                self._imap.copy(seq_num_bytes, deleted_folder)
+                self._imap.store(seq_num_bytes, "+FLAGS", "(\\Deleted)")
+                self._imap.expunge()
+        except imaplib.IMAP4.error as e:
+            raise ParseError(f"Failed to delete email: {e}") from e
 
 
 class AsyncMailClient:
-    """Asynchronous client for SU webmail (mail.su.se) via OWA API.
+    """Asynchronous client for SU webmail (ebox.su.se) via IMAP/SMTP.
 
     This is a thin async wrapper around MailClient using asyncio.to_thread().
     """
 
-    def __init__(self, username: str, password: str, timeout: int = 30):
+    def __init__(
+        self,
+        username: str | None = None,
+        password: str | None = None,
+        email_address: str | None = None,
+        timeout: int = 30,
+    ):
         """Initialize the async mail client.
 
         Args:
-            username: SU username (e.g., 'abcd1234')
-            password: SU password
+            username: SU username (default: read from SU_USERNAME env var)
+            password: SU password (default: read from SU_PASSWORD env var)
+            email_address: The email address to use as the sender address
+                (default: read from SU_EMAIL env var).
+                For personal accounts, use your personal email address.
+                For function accounts (funktionskonto), use the function account's email address.
             timeout: Request timeout in seconds
+
+        Raises:
+            AuthenticationError: If credentials or email not provided and not in env vars
         """
         self._username = username
         self._password = password
+        self._email_address = email_address
         self._timeout = timeout
         self._sync_client: MailClient | None = None
 
     async def __aenter__(self) -> "AsyncMailClient":
         """Enter async context manager and authenticate."""
-        self._sync_client = MailClient(self._username, self._password, self._timeout)
+        self._sync_client = MailClient(
+            self._username, self._password, self._email_address, self._timeout
+        )
         await asyncio.to_thread(self._sync_client.__enter__)
         return self
 
@@ -735,8 +762,21 @@ class AsyncMailClient:
             self._sync_client.get_email, message_id, change_key, body_type
         )
 
-    async def delete_email(self, message_id: str, permanent: bool = False) -> bool:
-        """Delete an email by ID."""
+    async def delete_email(self, change_key: str, permanent: bool = False) -> None:
+        """Delete an email using its change key.
+
+        Note: Use the change_key field from EmailMessage returned by get_emails().
+        The change_key contains the folder and IMAP sequence number.
+
+        Args:
+            change_key: Change key from EmailMessage (format: "folder:seqnum")
+            permanent: If True, permanently delete. If False, move to Deleted Items.
+
+        Raises:
+            NetworkError: If IMAP is not connected.
+            ValidationError: If change_key is invalid.
+            ParseError: If the IMAP operation fails.
+        """
         if not self._sync_client:
             raise NetworkError("Client not initialized")
-        return await asyncio.to_thread(self._sync_client.delete_email, message_id, permanent)
+        await asyncio.to_thread(self._sync_client.delete_email, change_key, permanent)

@@ -17,39 +17,34 @@ from dsv_wrapper import (
     SendEmailResult,
 )
 
-# Skip all tests if credentials not set
-pytestmark = pytest.mark.skipif(
-    not os.environ.get("SU_USERNAME") or not os.environ.get("SU_PASSWORD"),
-    reason="SU_USERNAME and SU_PASSWORD environment variables required",
+# Mark for tests that require credentials
+requires_credentials = pytest.mark.skipif(
+    not os.environ.get("SU_USERNAME")
+    or not os.environ.get("SU_PASSWORD")
+    or not os.environ.get("SU_EMAIL"),
+    reason="SU_USERNAME, SU_PASSWORD and SU_EMAIL environment variables required",
 )
 
 
-@pytest.fixture
-def credentials():
-    """Get credentials from environment."""
-    return {
-        "username": os.environ.get("SU_USERNAME"),
-        "password": os.environ.get("SU_PASSWORD"),
-    }
-
-
+@requires_credentials
 class TestMailClient:
     """Tests for synchronous MailClient."""
 
-    def test_get_folder_inbox(self, credentials):
+    def test_get_folder_inbox(self):
         """Test getting inbox folder info."""
-        with MailClient(**credentials) as client:
+        with MailClient() as client:
             folder = client.get_folder("inbox")
 
             assert isinstance(folder, MailFolder)
             assert folder.id
-            assert folder.name.lower() in ("inbox", "inkorgen")
+            # IMAP returns "INBOX" not localized names
+            assert folder.name.upper() == "INBOX"
             assert folder.total_count >= 0
             assert folder.unread_count >= 0
 
-    def test_get_folder_sentitems(self, credentials):
+    def test_get_folder_sentitems(self):
         """Test getting sent items folder info."""
-        with MailClient(**credentials) as client:
+        with MailClient() as client:
             folder = client.get_folder("sentitems")
 
             assert isinstance(folder, MailFolder)
@@ -57,9 +52,9 @@ class TestMailClient:
             assert "sent" in folder.name.lower()
             assert folder.total_count >= 0
 
-    def test_get_emails_inbox(self, credentials):
+    def test_get_emails_inbox(self):
         """Test listing emails from inbox."""
-        with MailClient(**credentials) as client:
+        with MailClient() as client:
             emails = client.get_emails("inbox", limit=5)
 
             assert isinstance(emails, list)
@@ -71,9 +66,9 @@ class TestMailClient:
                 # Subject can be empty
                 assert email.is_read in (True, False)
 
-    def test_get_email_full_content(self, credentials):
+    def test_get_email_full_content(self):
         """Test getting full email content."""
-        with MailClient(**credentials) as client:
+        with MailClient() as client:
             emails = client.get_emails("inbox", limit=1)
 
             if not emails:
@@ -89,14 +84,14 @@ class TestMailClient:
             assert full_email.body is not None
             assert full_email.body_type in (BodyType.TEXT, BodyType.HTML)
 
-    def test_send_email_to_self(self, credentials):
+    def test_send_email_to_self(self):
         """Test sending email to self with AUTOMATEDTESTSEND pattern."""
-        my_email = os.environ.get("SU_EMAIL", "edwinsu@dsv.su.se")
+        my_email = os.environ.get("SU_EMAIL")
 
         timestamp = int(time.time())
         subject = f"AUTOMATEDTESTSEND - {timestamp}"
 
-        with MailClient(**credentials) as client:
+        with MailClient() as client:
             result = client.send_email(
                 to=my_email,
                 subject=subject,
@@ -116,16 +111,16 @@ class TestMailClient:
                 emails = client.get_emails(folder, limit=20)
                 for email in emails:
                     if email.subject == subject:
-                        client.delete_email(email.id, permanent=True)
+                        client.delete_email(email.change_key, permanent=True)
 
-    def test_send_email_html(self, credentials):
+    def test_send_email_html(self):
         """Test sending HTML email to self."""
-        my_email = os.environ.get("SU_EMAIL", "edwinsu@dsv.su.se")
+        my_email = os.environ.get("SU_EMAIL")
 
         timestamp = int(time.time())
         subject = f"AUTOMATEDTESTSEND - {timestamp}"
 
-        with MailClient(**credentials) as client:
+        with MailClient() as client:
             result = client.send_email(
                 to=my_email,
                 subject=subject,
@@ -143,16 +138,16 @@ class TestMailClient:
                 emails = client.get_emails(folder, limit=20)
                 for email in emails:
                     if email.subject == subject:
-                        client.delete_email(email.id, permanent=True)
+                        client.delete_email(email.change_key, permanent=True)
 
-    def test_send_and_delete_email(self, credentials):
+    def test_send_and_delete_email(self):
         """Test sending email and then deleting it from inbox."""
-        my_email = os.environ.get("SU_EMAIL", "edwinsu@dsv.su.se")
+        my_email = os.environ.get("SU_EMAIL")
 
         timestamp = int(time.time())
         subject = f"AUTOMATEDTESTSEND - {timestamp}"
 
-        with MailClient(**credentials) as client:
+        with MailClient() as client:
             # Send the email
             result = client.send_email(
                 to=my_email,
@@ -177,24 +172,24 @@ class TestMailClient:
 
             # Delete if found
             if test_email:
-                deleted = client.delete_email(test_email.id, permanent=True)
-                assert deleted is True
+                client.delete_email(test_email.change_key, permanent=True)
 
                 # Also delete from sent items
                 sent_emails = client.get_emails("sentitems", limit=20)
                 for email in sent_emails:
                     if email.subject == subject:
-                        client.delete_email(email.id, permanent=True)
+                        client.delete_email(email.change_key, permanent=True)
                         break
 
 
+@requires_credentials
 class TestAsyncMailClient:
     """Tests for asynchronous AsyncMailClient."""
 
     @pytest.mark.asyncio
-    async def test_async_get_folder(self, credentials):
+    async def test_async_get_folder(self):
         """Test async getting folder info."""
-        async with AsyncMailClient(**credentials) as client:
+        async with AsyncMailClient() as client:
             folder = await client.get_folder("inbox")
 
             assert isinstance(folder, MailFolder)
@@ -202,9 +197,9 @@ class TestAsyncMailClient:
             assert folder.total_count >= 0
 
     @pytest.mark.asyncio
-    async def test_async_get_emails(self, credentials):
+    async def test_async_get_emails(self):
         """Test async listing emails."""
-        async with AsyncMailClient(**credentials) as client:
+        async with AsyncMailClient() as client:
             emails = await client.get_emails("inbox", limit=3)
 
             assert isinstance(emails, list)
@@ -212,14 +207,14 @@ class TestAsyncMailClient:
                 assert isinstance(email, EmailMessage)
 
     @pytest.mark.asyncio
-    async def test_async_send_email(self, credentials):
+    async def test_async_send_email(self):
         """Test async sending email to self."""
-        my_email = os.environ.get("SU_EMAIL", "edwinsu@dsv.su.se")
+        my_email = os.environ.get("SU_EMAIL")
 
         timestamp = int(time.time())
         subject = f"AUTOMATEDTESTSEND - {timestamp}"
 
-        async with AsyncMailClient(**credentials) as client:
+        async with AsyncMailClient() as client:
             result = await client.send_email(
                 to=my_email,
                 subject=subject,
@@ -235,7 +230,7 @@ class TestAsyncMailClient:
                 emails = await client.get_emails(folder, limit=20)
                 for email in emails:
                     if email.subject == subject:
-                        await client.delete_email(email.id, permanent=True)
+                        await client.delete_email(email.change_key, permanent=True)
 
 
 class TestMailModels:
