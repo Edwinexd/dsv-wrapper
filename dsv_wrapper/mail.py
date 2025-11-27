@@ -40,12 +40,13 @@ _SMTP_HOST = "ebox.su.se"
 _SMTP_PORT = 587
 
 # Folder name mapping from OWA-style to IMAP-style
+# Note: Folder names with spaces are quoted for IMAP compatibility
 _FOLDER_MAP = {
     "inbox": "INBOX",
-    "sentitems": "Sent Items",
+    "sentitems": '"Sent Items"',
     "drafts": "Drafts",
-    "deleteditems": "Deleted Items",
-    "junkemail": "Junk Email",
+    "deleteditems": '"Deleted Items"',
+    "junkemail": '"Junk Email"',
     "outbox": "Outbox",
 }
 
@@ -359,7 +360,8 @@ class MailClient:
                     sent_folder = self._get_imap_folder("sentitems")
                     # Add to sent folder with current time (email was just sent)
                     sent_time = imaplib.Time2Internaldate(datetime.now(tz=UTC))
-                    self._imap.append(sent_folder, "\\Seen", sent_time, msg.as_bytes())
+                    # Flags must be in parentheses for IMAP APPEND
+                    self._imap.append(sent_folder, "(\\Seen)", sent_time, msg.as_bytes())
                 except imaplib.IMAP4.error as e:
                     logger.warning(f"Failed to save to Sent Items: {e}")
                     # Don't fail the send if saving to sent fails
@@ -444,15 +446,24 @@ class MailClient:
             if status != "OK":
                 raise ParseError(f"Failed to select folder: {imap_folder}")
 
-            # Get all message IDs (sorted by date, newest first)
-            status, data = self._imap.sort("(REVERSE DATE)", "UTF-8", "ALL")
-            if status != "OK":
-                # Fallback to SEARCH if SORT not supported
-                status, data = self._imap.search(None, "ALL")
-                if status != "OK":
-                    return []
+            # Get all message IDs (try SORT first, fallback to SEARCH)
+            msg_ids = []
+            try:
+                # SORT is not supported by all IMAP servers (e.g., Exchange)
+                status, data = self._imap.sort("(REVERSE DATE)", "UTF-8", "ALL")
+                if status == "OK":
+                    msg_ids = data[0].split()
+            except imaplib.IMAP4.error:
+                pass  # SORT not supported, fall through to SEARCH
 
-            msg_ids = data[0].split()
+            if not msg_ids:
+                # Fallback to SEARCH (results won't be sorted)
+                status, data = self._imap.search(None, "ALL")
+                if status == "OK" and data[0]:
+                    msg_ids = data[0].split()
+                    # Reverse to get newest first (higher sequence numbers = newer)
+                    msg_ids = list(reversed(msg_ids))
+
             if not msg_ids:
                 return []
 
@@ -623,13 +634,13 @@ class MailClient:
             seq_num = change_key.encode()  # IMAP expects bytes
             if permanent:
                 # Mark as deleted and expunge
-                self._imap.store(seq_num, "+FLAGS", "\\Deleted")
+                self._imap.store(seq_num, "+FLAGS", "(\\Deleted)")
                 self._imap.expunge()
             else:
                 # Move to deleted items
                 deleted_folder = self._get_imap_folder("deleteditems")
                 self._imap.copy(seq_num, deleted_folder)
-                self._imap.store(seq_num, "+FLAGS", "\\Deleted")
+                self._imap.store(seq_num, "+FLAGS", "(\\Deleted)")
                 self._imap.expunge()
         except imaplib.IMAP4.error as e:
             raise ParseError(f"Failed to delete email: {e}") from e
