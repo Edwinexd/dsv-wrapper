@@ -606,7 +606,9 @@ class MailClient:
         except imaplib.IMAP4.error as e:
             raise ParseError(f"IMAP error fetching email: {e}") from e
 
-    def delete_email(self, change_key: str, permanent: bool = False) -> None:
+    def delete_email(
+        self, change_key: str, permanent: bool = False, folder_name: str = "inbox"
+    ) -> None:
         """Delete an email using its IMAP sequence number.
 
         Note: Use the change_key field from EmailMessage returned by get_emails().
@@ -615,6 +617,7 @@ class MailClient:
         Args:
             change_key: The IMAP sequence number from EmailMessage.change_key field.
             permanent: If True, permanently delete. If False, move to Deleted Items.
+            folder_name: The folder containing the email ('inbox', 'sentitems', etc.)
 
         Raises:
             NetworkError: If IMAP is not connected.
@@ -631,6 +634,12 @@ class MailClient:
             )
 
         try:
+            # Select the folder first - sequence numbers are folder-specific
+            imap_folder = self._get_imap_folder(folder_name)
+            status, _ = self._imap.select(imap_folder)
+            if status != "OK":
+                raise ParseError(f"Failed to select folder: {imap_folder}")
+
             seq_num = change_key.encode()  # IMAP expects bytes
             if permanent:
                 # Mark as deleted and expunge
@@ -731,10 +740,17 @@ class AsyncMailClient:
             self._sync_client.get_email, message_id, change_key, body_type
         )
 
-    async def delete_email(self, change_key: str, permanent: bool = False) -> None:
+    async def delete_email(
+        self, change_key: str, permanent: bool = False, folder_name: str = "inbox"
+    ) -> None:
         """Delete an email using its IMAP sequence number.
 
         Note: Use the change_key field from EmailMessage returned by get_emails().
+
+        Args:
+            change_key: The IMAP sequence number from EmailMessage.change_key field.
+            permanent: If True, permanently delete. If False, move to Deleted Items.
+            folder_name: The folder containing the email ('inbox', 'sentitems', etc.)
 
         Raises:
             NetworkError: If IMAP is not connected.
@@ -744,5 +760,5 @@ class AsyncMailClient:
         if not self._sync_client:
             raise NetworkError("Client not initialized")
         await asyncio.to_thread(
-            self._sync_client.delete_email, change_key, permanent
+            self._sync_client.delete_email, change_key, permanent, folder_name
         )
