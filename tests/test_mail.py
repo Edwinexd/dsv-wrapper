@@ -111,7 +111,7 @@ class TestMailClient:
                 emails = client.get_emails(folder, limit=20)
                 for email in emails:
                     if email.subject == subject:
-                        client.delete_email(email.change_key, permanent=True, folder_name=folder)
+                        client.delete_email(email.change_key, permanent=True)
 
     def test_send_email_html(self):
         """Test sending HTML email to self."""
@@ -138,7 +138,7 @@ class TestMailClient:
                 emails = client.get_emails(folder, limit=20)
                 for email in emails:
                     if email.subject == subject:
-                        client.delete_email(email.change_key, permanent=True, folder_name=folder)
+                        client.delete_email(email.change_key, permanent=True)
 
     def test_send_and_delete_email(self):
         """Test sending email and then deleting it from inbox."""
@@ -172,17 +172,13 @@ class TestMailClient:
 
             # Delete if found
             if test_email:
-                client.delete_email(
-                    test_email.change_key, permanent=True, folder_name="inbox"
-                )
+                client.delete_email(test_email.change_key, permanent=True)
 
                 # Also delete from sent items
                 sent_emails = client.get_emails("sentitems", limit=20)
                 for email in sent_emails:
                     if email.subject == subject:
-                        client.delete_email(
-                            email.change_key, permanent=True, folder_name="sentitems"
-                        )
+                        client.delete_email(email.change_key, permanent=True)
                         break
 
 
@@ -234,9 +230,7 @@ class TestAsyncMailClient:
                 emails = await client.get_emails(folder, limit=20)
                 for email in emails:
                     if email.subject == subject:
-                        await client.delete_email(
-                            email.change_key, permanent=True, folder_name=folder
-                        )
+                        await client.delete_email(email.change_key, permanent=True)
 
 
 class TestMailModels:
