@@ -16,6 +16,7 @@ from dsv_wrapper import (
     MailFolder,
     SendEmailResult,
 )
+from dsv_wrapper.exceptions import ValidationError
 
 # Mark for tests that require credentials
 requires_credentials = pytest.mark.skipif(
@@ -283,6 +284,48 @@ class TestMailModels:
         assert Importance.LOW.value == "Low"
         assert Importance.NORMAL.value == "Normal"
         assert Importance.HIGH.value == "High"
+
+
+class TestEmailNameValidation:
+    """Test email_name parameter validation."""
+
+    @requires_credentials
+    def test_email_name_plain_format(self):
+        """Test email_name with plain name format."""
+        my_email = os.environ.get("SU_EMAIL")
+        with MailClient(email_name="Lambda DSV") as client:
+            # Should format correctly
+            assert client._user_email == f'"Lambda DSV" <{my_email}>'
+
+    @requires_credentials
+    def test_email_name_with_matching_email(self):
+        """Test email_name with matching email address."""
+        my_email = os.environ.get("SU_EMAIL")
+        with MailClient(email_name=f"Lambda DSV <{my_email}>") as client:
+            # Should extract just the name
+            assert client._user_email == f'"Lambda DSV" <{my_email}>'
+
+    @requires_credentials
+    def test_email_name_with_mismatched_email(self):
+        """Test email_name with mismatched email address raises error."""
+        with pytest.raises(ValidationError) as exc_info:
+            MailClient(email_name="Lambda DSV <wrong@example.com>")
+        assert "does not match" in str(exc_info.value)
+
+    @requires_credentials
+    def test_email_name_none(self):
+        """Test email_name=None uses plain email address."""
+        my_email = os.environ.get("SU_EMAIL")
+        # Temporarily remove SU_EMAIL_NAME from environment
+        old_name = os.environ.pop("SU_EMAIL_NAME", None)
+        try:
+            with MailClient(email_name=None) as client:
+                # Should be just the email address
+                assert client._user_email == my_email
+        finally:
+            # Restore SU_EMAIL_NAME
+            if old_name:
+                os.environ["SU_EMAIL_NAME"] = old_name
 
 
 class TestMailApiParity:

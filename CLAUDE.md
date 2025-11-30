@@ -1,6 +1,6 @@
 ## Project Status
 
-- **52 of 52 pytest tests passing** - 100% pass rate!
+- **56 of 56 pytest tests passing** - 100% pass rate!
 - **Major architecture refactor COMPLETE**: Fully migrated from requests/aiohttp to httpx
 - **Strict error handling implemented**: Silent failures replaced with explicit ParseError exceptions
 - All clients (ACTLab, Daisy, Handledning, Clickmap) now use unified httpx architecture
@@ -90,7 +90,17 @@
 - **Server configuration**:
   - IMAP: `ebox.su.se:993` (SSL/TLS)
   - SMTP: `ebox.su.se:587` (STARTTLS)
-  - Username format: `winadsu\username`
+  - **Username formats**:
+    - Personal accounts: `winadsu\username`
+    - Function accounts: `winadsu\username\mailbox.institution` (auto-detected)
+- **Client initialization**:
+  - `username`: SU username (env: `SU_USERNAME`)
+  - `password`: SU password (env: `SU_PASSWORD`)
+  - `email_address`: Sender email address (env: `SU_EMAIL`)
+  - `email_name`: Display name for sender (env: `SU_EMAIL_NAME`) - **Added 2025-11-28**
+    - Supports both `"Name"` and `"Name <email@address>"` formats
+    - If `<email>` is provided, it must match `email_address` (validated)
+    - Emails will show as `"Name" <email@address>` instead of just `email@address`
 - **Client methods**:
   - `get_folder(folder_name)`: Get folder info (inbox, drafts, sentitems, etc.)
   - `get_emails(folder_name, limit)`: List emails in a folder (headers only, no body)
@@ -111,6 +121,10 @@
   - `delete_email()` selects folder in read-write mode before deletion (fixed 2025-11-27)
   - Folder IDs are hashes of folder names (IMAP doesn't have native IDs)
   - Email IDs are hashes of Message-ID headers
+  - **Function account support** (added 2025-11-28):
+    - Automatically detects function accounts vs personal accounts
+    - Uses correct IMAP login format: `winadsu\username\mailbox.institution`
+    - Example: For `lambda@dsv.su.se`, uses `winadsu\edsu8469\lambda.dsv`
 - **Benefits over OWA API**:
   - Standard protocols - no fragile JSON API dependencies
   - Simpler authentication - direct username/password

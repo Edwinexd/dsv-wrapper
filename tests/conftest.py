@@ -12,8 +12,8 @@ logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 
-# Load environment variables
-load_dotenv()
+# Load environment variables (override to use .env values)
+load_dotenv(override=True)
 
 
 def pytest_configure(config):

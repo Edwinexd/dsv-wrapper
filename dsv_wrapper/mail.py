@@ -205,6 +205,7 @@ class MailClient:
         username: str | None = None,
         password: str | None = None,
         email_address: str | None = None,
+        email_name: str | None = None,
         timeout: int = 30,
     ):
         """Initialize the mail client.
@@ -216,6 +217,10 @@ class MailClient:
                 (default: read from SU_EMAIL env var).
                 For personal accounts, use your personal email address.
                 For function accounts (funktionskonto), use the function account's email address.
+            email_name: Display name for sender (env: SU_EMAIL_NAME).
+                Supports "Name" or "Name <email@address>" formats.
+                If <email> is provided, it must match email_address.
+                From header will be "Name <email@address>".
             timeout: Request timeout in seconds
 
         Raises:
@@ -225,6 +230,7 @@ class MailClient:
         self._username = username or os.environ.get("SU_USERNAME")
         self._password = password or os.environ.get("SU_PASSWORD")
         self._email_address = email_address or os.environ.get("SU_EMAIL")
+        email_name_raw = email_name or os.environ.get("SU_EMAIL_NAME")
 
         if not self._username or not self._password:
             raise AuthenticationError(
@@ -236,6 +242,24 @@ class MailClient:
                 "Email address must be provided either as an argument or "
                 "via SU_EMAIL environment variable"
             )
+
+        # Parse email_name - support both "Name" and "Name <email@address>" formats
+        self._email_name = None
+        if email_name_raw:
+            # Check if it contains an email address in <>
+            if "<" in email_name_raw and ">" in email_name_raw:
+                # Parse "Name <email@address>" format
+                parsed_name, parsed_email = email.utils.parseaddr(email_name_raw)
+                if parsed_email and parsed_email != self._email_address:
+                    raise ValidationError(
+                        f"Email address in SU_EMAIL_NAME ({parsed_email}) "
+                        f"does not match SU_EMAIL ({self._email_address})"
+                    )
+                # Use just the name part
+                self._email_name = parsed_name if parsed_name else None
+            else:
+                # Plain name without email address
+                self._email_name = email_name_raw
 
         self._timeout = timeout
         self._imap: imaplib.IMAP4_SSL | None = None
@@ -258,12 +282,34 @@ class MailClient:
                 _IMAP_HOST, _IMAP_PORT, ssl_context=context, timeout=self._timeout
             )
 
-            # Use Windows AD format for authentication
-            login_username = f"winadsu\\{self._username}"
+            # Determine login username format
+            # For function accounts: winadsu\username\mailbox.institution
+            # For personal accounts: winadsu\username
+            if "@" in self._email_address:
+                # Extract mailbox name and institution from email
+                local_part, domain = self._email_address.split("@", 1)
+                institution = domain.split(".")[0]  # e.g., "dsv" from "dsv.su.se"
+
+                # Check if this looks like a function account (not personal)
+                # Personal accounts typically match the username
+                if local_part.lower() != self._username.lower():
+                    # Function account format
+                    login_username = f"winadsu\\{self._username}\\{local_part}.{institution}"
+                    logger.info(f"Using function account IMAP login: {local_part}.{institution}")
+                else:
+                    # Personal account format
+                    login_username = f"winadsu\\{self._username}"
+            else:
+                # Fallback to personal account format
+                login_username = f"winadsu\\{self._username}"
+
             self._imap.login(login_username, self._password)
 
-            # Use the provided email address
-            self._user_email = self._email_address
+            # Format email address with display name if provided
+            if self._email_name:
+                self._user_email = f'"{self._email_name}" <{self._email_address}>'
+            else:
+                self._user_email = self._email_address
 
             logger.info("Successfully connected to ebox.su.se IMAP")
 
@@ -688,6 +734,7 @@ class AsyncMailClient:
         username: str | None = None,
         password: str | None = None,
         email_address: str | None = None,
+        email_name: str | None = None,
         timeout: int = 30,
     ):
         """Initialize the async mail client.
@@ -699,6 +746,10 @@ class AsyncMailClient:
                 (default: read from SU_EMAIL env var).
                 For personal accounts, use your personal email address.
                 For function accounts (funktionskonto), use the function account's email address.
+            email_name: Display name for sender (env: SU_EMAIL_NAME).
+                Supports "Name" or "Name <email@address>" formats.
+                If <email> is provided, it must match email_address.
+                From header will be "Name <email@address>".
             timeout: Request timeout in seconds
 
         Raises:
@@ -707,13 +758,14 @@ class AsyncMailClient:
         self._username = username
         self._password = password
         self._email_address = email_address
+        self._email_name = email_name  # Pass through as-is, MailClient will parse it
         self._timeout = timeout
         self._sync_client: MailClient | None = None
 
     async def __aenter__(self) -> "AsyncMailClient":
         """Enter async context manager and authenticate."""
         self._sync_client = MailClient(
-            self._username, self._password, self._email_address, self._timeout
+            self._username, self._password, self._email_address, self._email_name, self._timeout
         )
         await asyncio.to_thread(self._sync_client.__enter__)
         return self
