@@ -8,11 +8,12 @@ import httpx
 
 from .auth import AsyncShibbolethAuth, ShibbolethAuth
 from .auth.cache_backend import CacheBackend
-from .exceptions import AuthenticationError
+from .exceptions import ACTLabError, AuthenticationError
 from .models.actlab import Slide, SlideUploadResult
 from .parsers.actlab import (
     SlideUploadError,
     find_newest_slide_id,
+    parse_error_message,
     parse_show_slides,
     parse_slides,
     parse_upload_form,
@@ -76,13 +77,37 @@ class ACTLabClient:
             self._authenticated = True
             logger.info("Successfully authenticated to ACT Lab")
 
+    def _get_cookie_header(self) -> str:
+        """Build Cookie header string from client cookies."""
+        cookies = []
+        for cookie in self._client.cookies.jar:
+            cookies.append(f"{cookie.name}={cookie.value}")
+        return "; ".join(cookies)
+
     def _post_action(self, data: dict) -> httpx.Response:
         """POST to action.php with proper redirect handling.
 
         ACT Lab's action.php returns 302 with empty Location on success.
+        Uses transport directly to avoid httpx cookie encoding issues with
+        non-ASCII Set-Cookie headers from the server.
         """
         action_url = ACTLAB_BASE_URL.rstrip("/") + "/action.php"
-        response = self._client.post(action_url, data=data, follow_redirects=False)
+
+        # Use transport directly to bypass httpx cookie processing
+        # ACT Lab sets error cookies with Swedish characters that crash httpx
+        headers = {**DEFAULT_HEADERS, "Cookie": self._get_cookie_header()}
+        request = httpx.Request("POST", action_url, data=data, headers=headers)
+        transport = httpx.HTTPTransport()
+        try:
+            response = transport.handle_request(request)
+        finally:
+            transport.close()
+
+        # Check for error cookie (contains Swedish error messages)
+        for key, value in response.headers.multi_items():
+            if key.lower() == "set-cookie" and value.startswith("error="):
+                error_msg = value.split(";")[0].replace("error=", "")
+                raise ACTLabError(error_msg)
 
         if response.status_code in (301, 302, 303):
             redirect_url = response.headers.get("Location", "")
@@ -90,10 +115,11 @@ class ACTLabClient:
                 if redirect_url.startswith("/"):
                     redirect_url = "https://www2.dsv.su.se" + redirect_url
                 response = self._client.get(redirect_url)
-                response.raise_for_status()
+                if not response.is_success:
+                    raise ACTLabError(f"HTTP {response.status_code}")
             # Empty redirect = success
         elif not response.is_success:
-            response.raise_for_status()
+            raise ACTLabError(f"HTTP {response.status_code}")
 
         return response
 
@@ -161,6 +187,11 @@ class ACTLabClient:
         # Get the new slide ID by fetching the page again and finding the max ID
         response = self._client.get(ACTLAB_BASE_URL)
         response.raise_for_status()
+
+        # Check for error message in the page
+        error_msg = parse_error_message(response.text)
+        if error_msg:
+            raise ACTLabError(error_msg)
 
         slide_id = find_newest_slide_id(response.text)
 
@@ -406,13 +437,37 @@ class AsyncACTLabClient:
             self._authenticated = True
             logger.info("Successfully authenticated to ACT Lab")
 
+    def _get_cookie_header(self) -> str:
+        """Build Cookie header string from client cookies."""
+        cookies = []
+        for cookie in self._client.cookies.jar:
+            cookies.append(f"{cookie.name}={cookie.value}")
+        return "; ".join(cookies)
+
     async def _post_action(self, data: dict) -> httpx.Response:
         """POST to action.php with proper redirect handling.
 
         ACT Lab's action.php returns 302 with empty Location on success.
+        Uses transport directly to avoid httpx cookie encoding issues with
+        non-ASCII Set-Cookie headers from the server.
         """
         action_url = ACTLAB_BASE_URL.rstrip("/") + "/action.php"
-        response = await self._client.post(action_url, data=data, follow_redirects=False)
+
+        # Use transport directly to bypass httpx cookie processing
+        # ACT Lab sets error cookies with Swedish characters that crash httpx
+        headers = {**DEFAULT_HEADERS, "Cookie": self._get_cookie_header()}
+        request = httpx.Request("POST", action_url, data=data, headers=headers)
+        transport = httpx.AsyncHTTPTransport()
+        try:
+            response = await transport.handle_async_request(request)
+        finally:
+            await transport.aclose()
+
+        # Check for error cookie (contains Swedish error messages)
+        for key, value in response.headers.multi_items():
+            if key.lower() == "set-cookie" and value.startswith("error="):
+                error_msg = value.split(";")[0].replace("error=", "")
+                raise ACTLabError(error_msg)
 
         if response.status_code in (301, 302, 303):
             redirect_url = response.headers.get("Location", "")
@@ -420,10 +475,11 @@ class AsyncACTLabClient:
                 if redirect_url.startswith("/"):
                     redirect_url = "https://www2.dsv.su.se" + redirect_url
                 response = await self._client.get(redirect_url)
-                response.raise_for_status()
+                if not response.is_success:
+                    raise ACTLabError(f"HTTP {response.status_code}")
             # Empty redirect = success
         elif not response.is_success:
-            response.raise_for_status()
+            raise ACTLabError(f"HTTP {response.status_code}")
 
         return response
 
@@ -612,6 +668,11 @@ class AsyncACTLabClient:
         # Get the new slide ID by fetching the page again and finding the max ID
         response = await self._client.get(ACTLAB_BASE_URL)
         response.raise_for_status()
+
+        # Check for error message in the page
+        error_msg = parse_error_message(response.text)
+        if error_msg:
+            raise ACTLabError(error_msg)
 
         slide_id = find_newest_slide_id(response.text)
 

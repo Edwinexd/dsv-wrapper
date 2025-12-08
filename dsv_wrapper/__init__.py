@@ -14,6 +14,7 @@ from .daisy import AsyncDaisyClient, DaisyClient
 
 # Exceptions
 from .exceptions import (
+    ACTLabError,
     AuthenticationError,
     BookingError,
     DSVWrapperError,
@@ -126,6 +127,7 @@ __all__ = [
     "MailFolder",
     "SendEmailResult",
     # Exceptions
+    "ACTLabError",
     "DSVWrapperError",
     "AuthenticationError",
     "SessionExpiredError",

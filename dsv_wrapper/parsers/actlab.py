@@ -1,10 +1,35 @@
 """ACT Lab HTML parsing functions."""
 
 import re
+from datetime import datetime
 
 from ..exceptions import DSVWrapperError
 from ..models.actlab import Slide
 from ..utils import extract_attr, extract_text, parse_html
+
+
+def parse_upload_time_from_filename(filename: str) -> datetime | None:
+    """Parse upload time from ACT Lab filename.
+
+    Filenames are formatted as YYMMDD-HHMMSS.ext (e.g., 180515-101811.png).
+
+    Args:
+        filename: The filename to parse
+
+    Returns:
+        datetime if parsing succeeds, None otherwise
+    """
+    match = re.match(r"(\d{6})-(\d{6})\.", filename)
+    if not match:
+        return None
+
+    date_part = match.group(1)  # YYMMDD
+    time_part = match.group(2)  # HHMMSS
+
+    try:
+        return datetime.strptime(f"{date_part}{time_part}", "%y%m%d%H%M%S")
+    except ValueError:
+        return None
 
 
 class SlideUploadError(DSVWrapperError):
@@ -35,13 +60,15 @@ def parse_slides(html: str) -> list[Slide]:
 
             # Extract filename from the anchor tag href (e.g., "../uploads/180515-101811.png")
             filename = None
+            upload_time = None
             anchor = slide_div.find("a", href=True)
             if anchor:
                 href = anchor.get("href", "")
                 if href:
                     filename = href.rsplit("/", 1)[-1]
+                    upload_time = parse_upload_time_from_filename(filename)
 
-            slides.append(Slide(id=slide_id, name=name, filename=filename))
+            slides.append(Slide(id=slide_id, name=name, filename=filename, upload_time=upload_time))
 
     return slides
 
@@ -120,3 +147,19 @@ def find_newest_slide_id(html: str) -> str | None:
         return None
 
     return max(all_slide_ids, key=int)
+
+
+def parse_error_message(html: str) -> str | None:
+    """Parse error message from ACT Lab admin page.
+
+    Args:
+        html: HTML content from ACT Lab admin page
+
+    Returns:
+        Error message if found, None otherwise
+    """
+    soup = parse_html(html)
+    error_div = soup.find("div", class_="error")
+    if error_div and "visible" in error_div.get("class", []):
+        return extract_text(error_div)
+    return None

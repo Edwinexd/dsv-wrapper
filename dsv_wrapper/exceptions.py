@@ -65,3 +65,9 @@ class ValidationError(DSVWrapperError):
     """Raised when data validation fails."""
 
     pass
+
+
+class ACTLabError(DSVWrapperError):
+    """Raised when ACT Lab operations fail."""
+
+    pass
