@@ -256,6 +256,25 @@ class ACTLabClient:
         logger.info(f"Slide {slide_id} removed from show {show_id}")
         return True
 
+    def delete_slide(self, slide_id: str) -> bool:
+        """Delete a slide permanently.
+
+        Args:
+            slide_id: Slide ID to delete
+
+        Returns:
+            True if successful
+        """
+        self._ensure_authenticated()
+
+        logger.info(f"Deleting slide {slide_id}")
+
+        data = {"action": "remove", "remove": slide_id, "from": "slides"}
+        self._post_action(data)
+
+        logger.info(f"Slide {slide_id} deleted")
+        return True
+
     def get_slides(self) -> list[Slide]:
         """Get list of all available slides.
 
@@ -508,6 +527,25 @@ class AsyncACTLabClient:
         await self._post_action(data)
 
         logger.info(f"Slide {slide_id} removed from show {show_id}")
+        return True
+
+    async def delete_slide(self, slide_id: str) -> bool:
+        """Delete a slide permanently.
+
+        Args:
+            slide_id: Slide ID to delete
+
+        Returns:
+            True if successful
+        """
+        await self._ensure_authenticated()
+
+        logger.info(f"Deleting slide {slide_id}")
+
+        data = {"action": "remove", "remove": slide_id, "from": "slides"}
+        await self._post_action(data)
+
+        logger.info(f"Slide {slide_id} deleted")
         return True
 
     async def upload_slide(

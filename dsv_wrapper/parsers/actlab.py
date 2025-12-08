@@ -32,7 +32,16 @@ def parse_slides(html: str) -> list[Slide]:
         if slide_id and slide_id.isdigit():
             name_elem = slide_div.find(class_="slide-name")
             name = extract_text(name_elem) if name_elem else f"Slide {slide_id}"
-            slides.append(Slide(id=slide_id, name=name))
+
+            # Extract filename from the anchor tag href (e.g., "../uploads/180515-101811.png")
+            filename = None
+            anchor = slide_div.find("a", href=True)
+            if anchor:
+                href = anchor.get("href", "")
+                if href:
+                    filename = href.rsplit("/", 1)[-1]
+
+            slides.append(Slide(id=slide_id, name=name, filename=filename))
 
     return slides
 
