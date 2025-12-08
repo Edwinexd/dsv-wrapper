@@ -8,6 +8,17 @@ from .actlab import ACTLabClient, AsyncACTLabClient
 # Authentication
 from .auth import AsyncShibbolethAuth, ServiceType, ShibbolethAuth
 from .auth.cache_backend import CacheBackend, FileCache, MemoryCache, NullCache
+
+# Bot
+from .bot import (
+    AsyncMailBot,
+    BotError,
+    ErrorCallback,
+    EventType,
+    MailBot,
+    NewEmailCallback,
+    NewEmailEvent,
+)
 from .clickmap import AsyncClickmapClient, ClickmapClient
 from .client import AsyncDSVClient, DSVClient
 from .daisy import AsyncDaisyClient, DaisyClient
@@ -36,6 +47,7 @@ from .models import (
     BookingSlot,
     Course,
     EmailAddress,
+    EmailAttachment,
     EmailMessage,
     HandledningSession,
     Importance,
@@ -91,6 +103,14 @@ __all__ = [
     "AsyncClickmapClient",
     "MailClient",
     "AsyncMailClient",
+    # Bot
+    "MailBot",
+    "AsyncMailBot",
+    "NewEmailEvent",
+    "BotError",
+    "EventType",
+    "NewEmailCallback",
+    "ErrorCallback",
     # Authentication
     "ShibbolethAuth",
     "AsyncShibbolethAuth",
@@ -121,6 +141,7 @@ __all__ = [
     "Placement",
     "BodyType",
     "EmailAddress",
+    "EmailAttachment",
     "EmailMessage",
     "Importance",
     "MailFolder",

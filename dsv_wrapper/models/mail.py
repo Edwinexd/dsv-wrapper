@@ -30,6 +30,18 @@ class EmailAddress(BaseModel):
     model_config = {"frozen": True}
 
 
+class EmailAttachment(BaseModel):
+    """Email attachment metadata."""
+
+    filename: str = Field(description="Attachment filename")
+    content_type: str = Field(description="MIME content type")
+    size: int = Field(description="Size in bytes")
+    content_id: str | None = Field(default=None, description="Content-ID for inline attachments")
+    is_inline: bool = Field(default=False, description="Whether attachment is inline")
+
+    model_config = {"frozen": True}
+
+
 class EmailMessage(BaseModel):
     """Email message from inbox or sent items."""
 
@@ -45,6 +57,9 @@ class EmailMessage(BaseModel):
     sent_at: datetime | None = Field(default=None, description="Date/time sent")
     is_read: bool = Field(default=False, description="Whether message has been read")
     has_attachments: bool = Field(default=False, description="Whether message has attachments")
+    attachments: list[EmailAttachment] = Field(
+        default_factory=list, description="List of attachment metadata"
+    )
     importance: Importance = Field(default=Importance.NORMAL, description="Message importance")
 
     model_config = {"frozen": True}

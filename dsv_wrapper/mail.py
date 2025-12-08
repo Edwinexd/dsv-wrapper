@@ -21,15 +21,21 @@ from email.message import EmailMessage as StdEmailMessage
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
+from dotenv import load_dotenv
+
 from .exceptions import AuthenticationError, NetworkError, ParseError, ValidationError
 from .models.mail import (
     BodyType,
     EmailAddress,
+    EmailAttachment,
     EmailMessage,
     Importance,
     MailFolder,
     SendEmailResult,
 )
+
+# Load environment variables from .env file
+load_dotenv(override=True)
 
 logger = logging.getLogger(__name__)
 
@@ -155,6 +161,70 @@ def _has_attachments(msg: StdEmailMessage) -> bool:
         if "attachment" in content_disposition:
             return True
     return False
+
+
+def _parse_attachments(msg: StdEmailMessage) -> list[EmailAttachment]:
+    """Extract attachment metadata from email message."""
+    attachments = []
+    if not msg.is_multipart():
+        return attachments
+
+    for part in msg.walk():
+        # Skip non-attachment parts
+        content_disposition = part.get("Content-Disposition", "")
+        content_type = part.get_content_type()
+
+        # Check if this part is an attachment
+        is_attachment = "attachment" in content_disposition
+        is_inline = "inline" in content_disposition
+
+        # Skip text/html and text/plain parts unless explicitly marked as attachment
+        if content_type in ("text/plain", "text/html") and not is_attachment:
+            continue
+
+        # Skip multipart containers
+        if content_type.startswith("multipart/"):
+            continue
+
+        # Get filename
+        filename = part.get_filename()
+        if not filename and not is_attachment and not is_inline:
+            continue
+
+        # Decode filename if needed
+        if filename:
+            filename = _decode_header_value(filename)
+        else:
+            # Generate filename from content type if missing
+            extension = content_type.split("/")[-1] if "/" in content_type else "bin"
+            filename = f"attachment.{extension}"
+
+        # Get content ID for inline attachments
+        content_id = part.get("Content-ID")
+        if content_id:
+            # Remove < > brackets
+            content_id = content_id.strip("<>")
+
+        # Calculate size
+        payload = part.get_payload(decode=False)
+        if isinstance(payload, bytes):
+            size = len(payload)
+        elif isinstance(payload, str):
+            size = len(payload.encode("utf-8", errors="replace"))
+        else:
+            size = 0
+
+        attachments.append(
+            EmailAttachment(
+                filename=filename,
+                content_type=content_type,
+                size=size,
+                content_id=content_id,
+                is_inline=is_inline,
+            )
+        )
+
+    return attachments
 
 
 def _html_to_plain_text(html_content: str) -> str:
@@ -330,6 +400,20 @@ class MailClient:
                 pass  # Ignore errors during logout
             self._imap = None
 
+    def _ensure_connected(self) -> None:
+        """Ensure IMAP connection is active, reconnect if needed."""
+        if self._imap is None:
+            self._connect_imap()
+            return
+
+        # Test connection with NOOP
+        try:
+            self._imap.noop()
+        except Exception:  # noqa: BLE001 - Connection lost, need to reconnect
+            logger.debug("IMAP connection lost, reconnecting...")
+            self._imap = None
+            self._connect_imap()
+
     def _get_imap_folder(self, folder_name: str) -> str:
         """Convert OWA-style folder name to IMAP folder name."""
         return _FOLDER_MAP.get(folder_name.lower(), folder_name)
@@ -482,8 +566,7 @@ class MailClient:
         Returns:
             List of EmailMessage objects (without body content)
         """
-        if not self._imap:
-            raise NetworkError("IMAP not connected")
+        self._ensure_connected()
 
         imap_folder = self._get_imap_folder(folder_name)
 
@@ -518,19 +601,31 @@ class MailClient:
 
             emails = []
             for msg_id in msg_ids:
-                # Fetch headers only (not body)
-                status, data = self._imap.fetch(msg_id, "(FLAGS BODY.PEEK[HEADER] INTERNALDATE)")
+                # Fetch headers and bodystructure (to detect attachments)
+                status, data = self._imap.fetch(
+                    msg_id, "(FLAGS BODY.PEEK[HEADER] BODYSTRUCTURE INTERNALDATE)"
+                )
                 if status != "OK" or not data or not data[0]:
                     continue
 
                 # Parse the response
+                # data is a list: [tuple(flags+headers), bodystructure_bytes, ...]
                 msg_data = data[0]
+                bodystructure_data = data[1] if len(data) > 1 else b""
+
                 if isinstance(msg_data, tuple) and len(msg_data) >= 2:
                     flags_info = msg_data[0].decode()
                     headers_raw = msg_data[1]
 
                     # Parse headers
                     msg = email.message_from_bytes(headers_raw)
+
+                    # Check for attachments in BODYSTRUCTURE
+                    # BODYSTRUCTURE contains 'attachment' or 'inline' for attachments
+                    has_attachments_flag = (
+                        b"attachment" in bodystructure_data.lower()
+                        or b'"attachment"' in bodystructure_data.lower()
+                    )
 
                     # Check if read (\\Seen flag)
                     is_read = b"\\Seen" in flags_info.encode()
@@ -568,9 +663,8 @@ class MailClient:
                             received_at=received_at,
                             sent_at=sent_at,
                             is_read=is_read,
-                            # has_attachments is False in list view - can't determine from
-                            # headers alone. Use get_email() to get accurate attachment info.
-                            has_attachments=False,
+                            # Detect attachments from BODYSTRUCTURE
+                            has_attachments=has_attachments_flag,
                             importance=_parse_importance(msg),
                         )
                     )
@@ -647,6 +741,9 @@ class MailClient:
             recipients = _parse_address_list(msg.get("To"))
             cc_recipients = _parse_address_list(msg.get("Cc"))
 
+            # Parse attachments
+            attachments = _parse_attachments(msg)
+
             return EmailMessage(
                 id=message_id,
                 change_key=change_key,
@@ -660,6 +757,7 @@ class MailClient:
                 sent_at=sent_at,
                 is_read=is_read,
                 has_attachments=_has_attachments(msg),
+                attachments=attachments,
                 importance=_parse_importance(msg),
             )
 
@@ -721,6 +819,72 @@ class MailClient:
                 self._imap.expunge()
         except imaplib.IMAP4.error as e:
             raise ParseError(f"Failed to delete email: {e}") from e
+
+    def download_attachment(self, change_key: str, filename: str) -> bytes:
+        """Download attachment content from an email.
+
+        Args:
+            change_key: Change key from EmailMessage (format: "folder:seqnum")
+            filename: Filename of the attachment to download
+
+        Returns:
+            Attachment content as bytes
+
+        Raises:
+            NetworkError: If IMAP is not connected.
+            ValidationError: If change_key is invalid.
+            ParseError: If the attachment is not found or cannot be downloaded.
+        """
+        if not self._imap:
+            raise NetworkError("IMAP not connected")
+
+        if not change_key:
+            raise ValidationError("change_key is required")
+
+        # Parse change_key to extract folder and sequence number
+        if ":" in change_key:
+            folder, seq_num = change_key.split(":", 1)
+        else:
+            seq_num = change_key
+            folder = None
+
+        # Select folder if specified
+        if folder:
+            try:
+                self._imap.select(folder, readonly=True)
+            except imaplib.IMAP4.error as e:
+                raise ParseError(f"Failed to select folder {folder}: {e}") from e
+
+        try:
+            # Fetch full message
+            status, data = self._imap.fetch(seq_num.encode(), "(RFC822)")
+            if status != "OK" or not data or not data[0]:
+                raise ParseError(f"Failed to fetch email: {change_key}")
+
+            msg_data = data[0]
+            if not isinstance(msg_data, tuple) or len(msg_data) < 2:
+                raise ParseError("Invalid IMAP response format")
+
+            raw_email = msg_data[1]
+            msg = email.message_from_bytes(raw_email)
+
+            # Find the attachment by filename
+            for part in msg.walk():
+                part_filename = part.get_filename()
+                if part_filename:
+                    # Decode filename
+                    decoded_filename = _decode_header_value(part_filename)
+                    if decoded_filename == filename:
+                        # Get the payload
+                        payload = part.get_payload(decode=True)
+                        if payload:
+                            return payload
+                        raise ParseError(f"Attachment {filename} has no content")
+
+            raise ParseError(f"Attachment not found: {filename}")
+
+        except imaplib.IMAP4.error as e:
+            raise ParseError(f"IMAP error downloading attachment: {e}") from e
 
 
 class AsyncMailClient:
@@ -832,3 +996,22 @@ class AsyncMailClient:
         if not self._sync_client:
             raise NetworkError("Client not initialized")
         await asyncio.to_thread(self._sync_client.delete_email, change_key, permanent)
+
+    async def download_attachment(self, change_key: str, filename: str) -> bytes:
+        """Download attachment content from an email.
+
+        Args:
+            change_key: Change key from EmailMessage (format: "folder:seqnum")
+            filename: Filename of the attachment to download
+
+        Returns:
+            Attachment content as bytes
+
+        Raises:
+            NetworkError: If IMAP is not connected.
+            ValidationError: If change_key is invalid.
+            ParseError: If the attachment is not found or cannot be downloaded.
+        """
+        if not self._sync_client:
+            raise NetworkError("Client not initialized")
+        return await asyncio.to_thread(self._sync_client.download_attachment, change_key, filename)

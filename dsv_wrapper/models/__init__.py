@@ -43,6 +43,7 @@ from .handledning import HandledningSession, QueueEntry, QueueStatus
 from .mail import (
     BodyType,
     EmailAddress,
+    EmailAttachment,
     EmailMessage,
     Importance,
     MailFolder,
@@ -80,6 +81,7 @@ __all__ = [
     # Mail models
     "BodyType",
     "EmailAddress",
+    "EmailAttachment",
     "EmailMessage",
     "Importance",
     "MailFolder",

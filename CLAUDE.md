@@ -1,9 +1,9 @@
 ## Project Status
 
-- **56 of 56 pytest tests passing** - 100% pass rate!
+- **70 of 70 pytest tests passing** - 100% pass rate!
 - **Major architecture refactor COMPLETE**: Fully migrated from requests/aiohttp to httpx
 - **Strict error handling implemented**: Silent failures replaced with explicit ParseError exceptions
-- All clients (ACTLab, Daisy, Handledning, Clickmap) now use unified httpx architecture
+- All clients (ACTLab, Daisy, Handledning, Clickmap, Mail) now use unified httpx architecture
 - Sync and async clients have full API parity with automated tests to prevent de-sync
 - **All authentication and cookie issues resolved**
 - ~50% code duplication eliminated through shared parsing functions
@@ -11,6 +11,7 @@
 - Disclaimer added to README regarding AI-generated code experiment
 - **NEW: Clickmap client added** - Extract DSV office/workspace placements
 - **NEW: Mail client added** - Send and read emails via SU webmail (mail.su.se)
+- **NEW: MailBot added** - Event-driven email monitoring with IMAP IDLE push notifications
 
 ## Architecture Changes (2025-11-24)
 
@@ -131,6 +132,60 @@
   - Better error handling - clear IMAP/SMTP error codes
   - No session management or token handling needed
 
+### MailBot - Event-Driven Email Monitoring (New - 2025-11-30)
+- **New bot module** - Event-driven email monitoring with IMAP IDLE push notifications
+- Both `MailBot` and `AsyncMailBot` implemented
+- **Connection management fixes (2025-11-30)**:
+  - Fixed repeated IMAP logins - bot now maintains persistent MailClient connection
+  - Fixed IdleHandler to use same login format as MailClient (function account support)
+  - Fixed IDLE fallback - now properly switches to polling mode when IDLE unsupported
+  - Fixed example code - reuses single AsyncMailClient instead of creating new ones
+- **Features**:
+  - Real-time email monitoring using IMAP IDLE (RFC 2177)
+  - Automatic fallback to polling if IDLE not supported
+  - Callback-based event delivery
+  - At-least-once event semantics (user callbacks should be idempotent)
+  - Auto-reconnection with exponential backoff
+  - Thread-safe (sync) and async-safe implementations
+- **Bot initialization**:
+  - Same credentials as MailClient (SU_USERNAME, SU_PASSWORD, etc.)
+  - `folder`: Folder to monitor (default: "inbox")
+  - `fetch_limit`: Recent emails to fetch per notification (default: 20)
+  - `poll_interval`: Polling interval if IDLE unavailable (default: 60s)
+  - `enable_polling_fallback`: Auto-fallback to polling (default: True)
+- **Bot methods**:
+  - `on_new_email(callback)`: Register callback for new email events
+  - `on_error(callback)`: Register callback for error events
+  - `start()`: Start monitoring (blocking)
+  - `stop()`: Stop monitoring
+  - `remove_callback(callback)`: Unregister callback
+- **Event models**:
+  - `NewEmailEvent`: Contains full `EmailMessage` with all fields
+  - `BotError`: Error with type, message, recoverable flag
+  - `EventType` enum: NEW_EMAIL (more events possible in future)
+- **Implementation details**:
+  - Uses `imap-tools` library for IMAP IDLE support
+  - Separate IMAP connection for IDLE monitoring
+  - Uses existing MailClient for fetching email details
+  - No changes to MailClient - bot is separate module
+  - Logging via Python's `logging` module
+  - **At-least-once semantics**: Emails may be delivered multiple times on reconnections
+  - **IDLE renewal**: Automatically renews IDLE every 29 minutes per RFC 2177
+  - **Polling fallback**: Logs warning and falls back to polling if IDLE unsupported
+- **Example usage**:
+  ```python
+  from dsv_wrapper import MailBot
+
+  def handle_new_email(event):
+      print(f"New: {event.email.subject}")
+      print(f"From: {event.email.sender.email}")
+
+  with MailBot(fetch_limit=10) as bot:
+      bot.on_new_email(handle_new_email)
+      bot.start()  # Blocks until Ctrl+C
+  ```
+- All 14 bot tests passing (unit tests + integration tests + API parity)
+
 ### Strict Error Handling (Complete)
 - **Replaced silent failures with explicit ParseError exceptions**
 - Parsing functions now raise ParseError instead of silently continuing on errors:
@@ -161,6 +216,7 @@
 - ✅ Handledning client migration to httpx
 - ✅ **Clickmap client added** (new service - 2025-11-25)
 - ✅ **Mail client refactored to IMAP/SMTP** (2025-11-26) - Replaced fragile OWA API with standard protocols
+- ✅ **MailBot - Event-driven email monitoring** (2025-11-30) - IMAP IDLE push notifications with callback-based event delivery
 - ✅ BaseAsyncClient removed
 - ✅ Old unified client files removed (base_unified.py, shibboleth_unified.py, actlab_unified.py)
 - ✅ requirements.txt updated (removed requests and aiohttp dependencies)
@@ -191,10 +247,11 @@
 
 ## Testing Notes
 
-- **Test coverage: 52/52 passing - 100%!**
+- **Test coverage: 70/70 passing - 100%!**
 - All authentication tests pass including invalid credentials detection
 - API parity tests verify sync/async clients have identical method signatures
-- All ACTLab, Daisy, Handledning, Clickmap, and Mail tests pass
+- All ACTLab, Daisy, Handledning, Clickmap, Mail, and Bot tests pass
+- Bot tests include: context managers, callback registration, event delivery, error handling, API parity
 - Cookie handling fixed: domain/path properly preserved in async clients
 - Enum serialization fixed: InstitutionID properly converted to value in form data
 - Clickmap tests include: placements retrieval, search, filtering, model validation, API parity
