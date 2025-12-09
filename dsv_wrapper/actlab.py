@@ -204,8 +204,8 @@ class ACTLabClient:
 
     def _configure_slide(
         self,
-        slide_id: str,
-        show_id: str = "1",
+        slide_id: int,
+        show_id: int = 1,
         auto_delete: bool = True,
         start_time: str = "",
         end_time: str = "",
@@ -239,9 +239,7 @@ class ACTLabClient:
         logger.debug(f"Slide {slide_id} configured successfully")
         return True
 
-    def add_slide_to_show(
-        self, slide_id: str, show_id: str = "1", auto_delete: bool = True
-    ) -> bool:
+    def add_slide_to_show(self, slide_id: int, show_id: int = 1, auto_delete: bool = True) -> bool:
         """Add a slide to a show.
 
         Args:
@@ -267,7 +265,7 @@ class ACTLabClient:
 
         return True
 
-    def remove_slide_from_show(self, slide_id: str, show_id: str = "1") -> bool:
+    def remove_slide_from_show(self, slide_id: int, show_id: int = 1) -> bool:
         """Remove a slide from a show.
 
         Args:
@@ -287,7 +285,7 @@ class ACTLabClient:
         logger.info(f"Slide {slide_id} removed from show {show_id}")
         return True
 
-    def delete_slide(self, slide_id: str) -> bool:
+    def delete_slide(self, slide_id: int) -> bool:
         """Delete a slide permanently.
 
         Args:
@@ -323,7 +321,7 @@ class ACTLabClient:
         logger.info(f"Found {len(slides)} slides")
         return slides
 
-    def cleanup_old_slides(self, show_id: str = "1", keep_latest: int = 1) -> int:
+    def cleanup_old_slides(self, show_id: int = 1, keep_latest: int = 1) -> int:
         """Remove old slides from a show, keeping only the latest N.
 
         Args:
@@ -502,8 +500,8 @@ class AsyncACTLabClient:
 
     async def _configure_slide(
         self,
-        slide_id: str,
-        show_id: str = "1",
+        slide_id: int,
+        show_id: int = 1,
         auto_delete: bool = True,
         start_time: str = "",
         end_time: str = "",
@@ -538,7 +536,7 @@ class AsyncACTLabClient:
         return True
 
     async def add_slide_to_show(
-        self, slide_id: str, show_id: str = "1", auto_delete: bool = True
+        self, slide_id: int, show_id: int = 1, auto_delete: bool = True
     ) -> bool:
         """Add a slide to a show.
 
@@ -565,7 +563,7 @@ class AsyncACTLabClient:
 
         return True
 
-    async def remove_slide_from_show(self, slide_id: str, show_id: str = "1") -> bool:
+    async def remove_slide_from_show(self, slide_id: int, show_id: int = 1) -> bool:
         """Remove a slide from a show.
 
         Args:
@@ -585,7 +583,7 @@ class AsyncACTLabClient:
         logger.info(f"Slide {slide_id} removed from show {show_id}")
         return True
 
-    async def delete_slide(self, slide_id: str) -> bool:
+    async def delete_slide(self, slide_id: int) -> bool:
         """Delete a slide permanently.
 
         Args:
@@ -683,7 +681,7 @@ class AsyncACTLabClient:
         logger.info(f"Slide uploaded successfully with ID: {slide_id}")
         return SlideUploadResult(success=True, slide_id=slide_id, message="Upload successful")
 
-    async def cleanup_old_slides(self, show_id: str = "1", keep_latest: int = 1) -> int:
+    async def cleanup_old_slides(self, show_id: int = 1, keep_latest: int = 1) -> int:
         """Remove old slides from a show, keeping only the latest N.
 
         Args:

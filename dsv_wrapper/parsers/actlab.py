@@ -38,6 +38,53 @@ class SlideUploadError(DSVWrapperError):
     pass
 
 
+def _parse_slide_div(slide_div, show_id: int | None = None) -> Slide | None:
+    """Parse a single slide div element.
+
+    Args:
+        slide_div: BeautifulSoup element for the slide div
+        show_id: Show ID if the slide is in a show, None otherwise
+
+    Returns:
+        Slide object or None if parsing fails
+    """
+    slide_id_str = extract_attr(slide_div, "id", "")
+
+    if not slide_id_str or not slide_id_str.isdigit():
+        return None
+
+    slide_id = int(slide_id_str)
+    name_elem = slide_div.find(class_="slide-name")
+    name = extract_text(name_elem) if name_elem else f"Slide {slide_id}"
+
+    # Extract filename from the anchor tag href (e.g., "../uploads/180515-101811.png")
+    filename = None
+    upload_time = None
+    anchor = slide_div.find("a", href=True)
+    if anchor:
+        href = anchor.get("href", "")
+        if href:
+            filename = href.rsplit("/", 1)[-1]
+            upload_time = parse_upload_time_from_filename(filename)
+
+    # Extract auto_delete from the settings form checkbox
+    auto_delete = False
+    form = slide_div.find("form", class_="settingsform")
+    if form:
+        autodelete_input = form.find("input", {"name": "autodelete"})
+        if autodelete_input:
+            auto_delete = autodelete_input.has_attr("checked")
+
+    return Slide(
+        id=slide_id,
+        name=name,
+        filename=filename,
+        upload_time=upload_time,
+        show_id=show_id,
+        auto_delete=auto_delete,
+    )
+
+
 def parse_slides(html: str) -> list[Slide]:
     """Parse slides from admin page HTML.
 
@@ -49,31 +96,35 @@ def parse_slides(html: str) -> list[Slide]:
     """
     soup = parse_html(html)
     slides = []
+    seen_ids = set()
 
-    slide_divs = soup.find_all("div", class_="slide")
-    for slide_div in slide_divs:
-        slide_id = extract_attr(slide_div, "id", "")
+    # First, parse slides from shows (these have show_id set)
+    show_divs = soup.find_all("div", class_="show")
+    for show_div in show_divs:
+        show_id_str = extract_attr(show_div, "id", "")
+        if show_id_str and show_id_str.isdigit():
+            show_id = int(show_id_str)
+            slide_divs = show_div.find_all("div", class_="slide")
+            for slide_div in slide_divs:
+                slide = _parse_slide_div(slide_div, show_id=show_id)
+                if slide and slide.id not in seen_ids:
+                    slides.append(slide)
+                    seen_ids.add(slide.id)
 
-        if slide_id and slide_id.isdigit():
-            name_elem = slide_div.find(class_="slide-name")
-            name = extract_text(name_elem) if name_elem else f"Slide {slide_id}"
-
-            # Extract filename from the anchor tag href (e.g., "../uploads/180515-101811.png")
-            filename = None
-            upload_time = None
-            anchor = slide_div.find("a", href=True)
-            if anchor:
-                href = anchor.get("href", "")
-                if href:
-                    filename = href.rsplit("/", 1)[-1]
-                    upload_time = parse_upload_time_from_filename(filename)
-
-            slides.append(Slide(id=slide_id, name=name, filename=filename, upload_time=upload_time))
+    # Then, parse slides from the general slides container (no show_id)
+    slides_container = soup.find("div", id="slides")
+    if slides_container:
+        slide_divs = slides_container.find_all("div", class_="slide", recursive=False)
+        for slide_div in slide_divs:
+            slide = _parse_slide_div(slide_div, show_id=None)
+            if slide and slide.id not in seen_ids:
+                slides.append(slide)
+                seen_ids.add(slide.id)
 
     return slides
 
 
-def parse_show_slides(html: str, show_id: str) -> list[str]:
+def parse_show_slides(html: str, show_id: int) -> list[int]:
     """Parse slide IDs from a specific show.
 
     Args:
@@ -84,7 +135,7 @@ def parse_show_slides(html: str, show_id: str) -> list[str]:
         List of slide IDs in the show
     """
     soup = parse_html(html)
-    show_div = soup.find("div", {"id": show_id, "class": "show"})
+    show_div = soup.find("div", {"id": str(show_id), "class": "show"})
 
     if not show_div:
         return []
@@ -95,7 +146,7 @@ def parse_show_slides(html: str, show_id: str) -> list[str]:
     for slide_div in slide_divs:
         id_attr = extract_attr(slide_div, "id", "")
         if id_attr and id_attr.isdigit():
-            slide_ids.append(id_attr)
+            slide_ids.append(int(id_attr))
 
     return slide_ids
 
@@ -132,7 +183,7 @@ def parse_upload_form(html: str, base_url: str) -> tuple[str, str, str]:
     return form_action_url, action_value, max_file_size
 
 
-def find_newest_slide_id(html: str) -> str | None:
+def find_newest_slide_id(html: str) -> int | None:
     """Find the newest slide ID from HTML.
 
     Args:
@@ -146,7 +197,7 @@ def find_newest_slide_id(html: str) -> str | None:
     if not all_slide_ids:
         return None
 
-    return max(all_slide_ids, key=int)
+    return max(int(sid) for sid in all_slide_ids)
 
 
 def parse_error_message(html: str) -> str | None:
