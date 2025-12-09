@@ -1,8 +1,10 @@
 """Daisy client for room booking and schedule management."""
 
+import asyncio
 import logging
 import os
 import re
+import time as time_module
 from datetime import date, time
 
 import httpx
@@ -387,33 +389,50 @@ class DaisyClient:
         logger.info(f"Completed: {len(detailed_staff)} staff members with details")
         return detailed_staff
 
-    def download_profile_picture(self, url: str) -> bytes:
+    def download_profile_picture(self, url: str, max_retries: int = 3) -> bytes:
         """Download a profile picture from the given URL.
 
         Args:
             url: The URL of the profile picture
+            max_retries: Maximum number of retry attempts for transient errors
 
         Returns:
             Image bytes
 
         Raises:
-            NetworkError: If the download fails
+            NetworkError: If the download fails after all retries
             ValueError: If the response is not an image
         """
         self._ensure_authenticated()
 
-        try:
-            response = self._client.get(url, timeout=10)
-            response.raise_for_status()
+        last_error = None
+        for attempt in range(max_retries + 1):
+            try:
+                response = self._client.get(url, timeout=10)
+                response.raise_for_status()
 
-            content_type = response.headers.get("Content-Type", "")
-            if "image" not in content_type:
-                raise ValueError(f"URL did not return an image (Content-Type: {content_type})")
+                content_type = response.headers.get("Content-Type", "")
+                if "image" not in content_type:
+                    raise ValueError(f"URL did not return an image (Content-Type: {content_type})")
 
-            return response.content
+                return response.content
 
-        except httpx.HTTPError as e:
-            raise NetworkError(f"Failed to download profile picture: {e}") from e
+            except httpx.HTTPStatusError as e:
+                # Don't retry client errors (4xx)
+                if 400 <= e.response.status_code < 500:
+                    raise NetworkError(f"Failed to download profile picture: {e}") from e
+                last_error = e
+            except httpx.HTTPError as e:
+                # Retry on network errors (connection, timeout, protocol errors)
+                last_error = e
+
+            if attempt < max_retries:
+                wait_time = 2**attempt  # Exponential backoff: 1, 2, 4 seconds
+                logger.debug(f"Retry {attempt + 1}/{max_retries} for {url} after {wait_time}s")
+                time_module.sleep(wait_time)
+
+        msg = f"Failed to download profile picture after {max_retries + 1} attempts: {last_error}"
+        raise NetworkError(msg) from last_error
 
     def close(self) -> None:
         """Close the client session."""
@@ -792,30 +811,47 @@ class AsyncDaisyClient:
         logger.info(f"Completed: {len(detailed_staff)} staff members with details")
         return detailed_staff
 
-    async def download_profile_picture(self, url: str) -> bytes:
+    async def download_profile_picture(self, url: str, max_retries: int = 3) -> bytes:
         """Download a profile picture from the given URL.
 
         Args:
             url: The URL of the profile picture
+            max_retries: Maximum number of retry attempts for transient errors
 
         Returns:
             Image bytes
 
         Raises:
-            NetworkError: If the download fails
+            NetworkError: If the download fails after all retries
             ValueError: If the response is not an image
         """
         await self._ensure_authenticated()
 
-        try:
-            response = await self._client.get(url, timeout=10)
-            response.raise_for_status()
+        last_error = None
+        for attempt in range(max_retries + 1):
+            try:
+                response = await self._client.get(url, timeout=10)
+                response.raise_for_status()
 
-            content_type = response.headers.get("Content-Type", "")
-            if "image" not in content_type:
-                raise ValueError(f"URL did not return an image (Content-Type: {content_type})")
+                content_type = response.headers.get("Content-Type", "")
+                if "image" not in content_type:
+                    raise ValueError(f"URL did not return an image (Content-Type: {content_type})")
 
-            return response.content
+                return response.content
 
-        except httpx.HTTPError as e:
-            raise NetworkError(f"Failed to download profile picture: {e}") from e
+            except httpx.HTTPStatusError as e:
+                # Don't retry client errors (4xx)
+                if 400 <= e.response.status_code < 500:
+                    raise NetworkError(f"Failed to download profile picture: {e}") from e
+                last_error = e
+            except httpx.HTTPError as e:
+                # Retry on network errors (connection, timeout, protocol errors)
+                last_error = e
+
+            if attempt < max_retries:
+                wait_time = 2**attempt  # Exponential backoff: 1, 2, 4 seconds
+                logger.debug(f"Retry {attempt + 1}/{max_retries} for {url} after {wait_time}s")
+                await asyncio.sleep(wait_time)
+
+        msg = f"Failed to download profile picture after {max_retries + 1} attempts: {last_error}"
+        raise NetworkError(msg) from last_error
