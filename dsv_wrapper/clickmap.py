@@ -84,7 +84,7 @@ class ClickmapClient:
         logger.debug(f"Fetching placements from {url}")
 
         try:
-            response = self._client.get(url, timeout=30)
+            response = self._client.get(url, timeout=60)
             response.raise_for_status()
         except httpx.HTTPError as e:
             raise NetworkError(f"Failed to fetch placements: {e}") from e
@@ -267,7 +267,7 @@ class AsyncClickmapClient:
         logger.debug(f"Fetching placements from {url}")
 
         try:
-            response = await self._client.get(url, timeout=30)
+            response = await self._client.get(url, timeout=60)
             response.raise_for_status()
         except httpx.HTTPError as e:
             raise NetworkError(f"Failed to fetch placements: {e}") from e
