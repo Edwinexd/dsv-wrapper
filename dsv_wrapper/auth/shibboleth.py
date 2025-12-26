@@ -108,7 +108,7 @@ class ShibbolethAuth:
         try:
             # Make a lightweight test request based on service
             test_url = self._get_validation_url(service)
-            response = self._client.get(test_url, timeout=10)
+            response = self._client.get(test_url, timeout=60)
 
             # If we get redirected to login, cookies are invalid
             if response.status_code in (301, 302, 303):
@@ -176,7 +176,7 @@ class ShibbolethAuth:
 
         # Step 1: Request the service URL to get redirected to Shibboleth
         logger.debug("Step 1: Requesting service URL to initiate SSO")
-        response = self._client.get(service_url)
+        response = self._client.get(service_url, timeout=60)
         # Manually follow redirects
         while response.status_code in (301, 302, 303):
             location = response.headers["Location"]
@@ -185,7 +185,7 @@ class ShibbolethAuth:
                 # Use the current response URL's base
                 base_url = f"{response.url.scheme}://{response.url.host}"
                 location = base_url + location
-            response = self._client.get(location)
+            response = self._client.get(location, timeout=60)
 
         # Step 2: Handle intermediate localStorage form (if present)
         logger.debug("Step 2: Checking for intermediate localStorage form")
@@ -210,7 +210,7 @@ class ShibbolethAuth:
             # Submit the form (need full URL if action is relative)
             if form_action.startswith("/"):
                 form_action = "https://idp.it.su.se" + form_action
-            response = self._client.post(form_action, data=form_data)
+            response = self._client.post(form_action, data=form_data, timeout=60)
 
             # Follow redirect if needed
             while response.status_code in (301, 302, 303):
@@ -218,7 +218,7 @@ class ShibbolethAuth:
                 if location.startswith("/"):
                     base_url = f"{response.url.scheme}://{response.url.host}"
                     location = base_url + location
-                response = self._client.get(location)
+                response = self._client.get(location, timeout=60)
 
             soup = parse_html(response.text)
 
@@ -281,7 +281,7 @@ class ShibbolethAuth:
             if form_action.startswith("/"):
                 form_action = "https://idp.it.su.se" + form_action
 
-            response = self._client.post(form_action, data=login_data)
+            response = self._client.post(form_action, data=login_data, timeout=60)
             logger.debug(f"Login response status: {response.status_code}")
 
             # Check if login failed - either 200 with error or stayed on login page
@@ -306,13 +306,13 @@ class ShibbolethAuth:
                 if location.startswith("/"):
                     base_url = f"{response.url.scheme}://{response.url.host}"
                     location = base_url + location
-                response = self._client.get(location)
+                response = self._client.get(location, timeout=60)
                 while response.status_code in (301, 302, 303):
                     location = response.headers["Location"]
                     if location.startswith("/"):
                         base_url = f"{response.url.scheme}://{response.url.host}"
                         location = base_url + location
-                    response = self._client.get(location)
+                    response = self._client.get(location, timeout=60)
 
                 # After following redirects, check if we ended up back on login page
                 soup = parse_html(response.text)
@@ -337,13 +337,13 @@ class ShibbolethAuth:
                 if name:
                     saml_data[name] = value or ""
 
-            response = self._client.post(saml_action, data=saml_data)
+            response = self._client.post(saml_action, data=saml_data, timeout=60)
             while response.status_code in (301, 302, 303):
                 location = response.headers["Location"]
                 if location.startswith("/"):
                     base_url = f"{response.url.scheme}://{response.url.host}"
                     location = base_url + location
-                response = self._client.get(location)
+                response = self._client.get(location, timeout=60)
 
         # Verify we're authenticated by checking cookies AND validating them
         logger.debug("Verifying authentication by checking cookies")
