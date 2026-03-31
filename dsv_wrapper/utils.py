@@ -22,6 +22,7 @@ DSV_SSO_TARGETS = {
     "handledning": "https://handledning.dsv.su.se",
     "actlab": "https://www2.dsv.su.se/act-lab/admin/",
     "clickmap": "https://clickmap.dsv.su.se/api/login?return=/",
+    "play": "https://play.dsv.su.se",
 }
 
 # DSV system base URLs - for making API requests
@@ -32,6 +33,7 @@ DSV_URLS = {
     "handledning_mobile": "https://handledning.dsv.su.se/mobile",
     "actlab": "https://www2.dsv.su.se/act-lab/admin/",
     "clickmap": "https://clickmap.dsv.su.se",
+    "play": "https://play.dsv.su.se",
     "shibboleth_login": "https://login.su.se/idp/profile/SAML2/Redirect/SSO",
 }
 

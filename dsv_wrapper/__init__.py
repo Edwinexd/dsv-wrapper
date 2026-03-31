@@ -43,6 +43,9 @@ from .models import (
     InstitutionID,
     MailFolder,
     Placement,
+    PlayCourse,
+    Presentation,
+    Presenter,
     QueueEntry,
     QueueStatus,
     Room,
@@ -57,7 +60,10 @@ from .models import (
     Staff,
     Student,
     Teacher,
+    TranscriptCue,
+    VideoSource,
 )
+from .play import AsyncPlayClient, PlayClient
 
 # Utilities
 from .utils import (
@@ -90,6 +96,8 @@ __all__ = [
     "AsyncACTLabClient",
     "ClickmapClient",
     "AsyncClickmapClient",
+    "PlayClient",
+    "AsyncPlayClient",
     "MailClient",
     "AsyncMailClient",
     # Authentication
@@ -120,6 +128,11 @@ __all__ = [
     "Show",
     "SlideUploadResult",
     "Placement",
+    "PlayCourse",
+    "Presenter",
+    "VideoSource",
+    "Presentation",
+    "TranscriptCue",
     "BodyType",
     "EmailAddress",
     "EmailMessage",

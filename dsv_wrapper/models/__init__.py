@@ -49,6 +49,9 @@ from .mail import (
     SendEmailResult,
 )
 
+# Play models
+from .play import PlayCourse, Presentation, Presenter, TranscriptCue, VideoSource
+
 __all__ = [
     # Common models
     "Student",
@@ -77,6 +80,12 @@ __all__ = [
     "SlideUploadResult",
     # Clickmap models
     "Placement",
+    # Play models
+    "PlayCourse",
+    "Presenter",
+    "VideoSource",
+    "Presentation",
+    "TranscriptCue",
     # Mail models
     "BodyType",
     "EmailAddress",

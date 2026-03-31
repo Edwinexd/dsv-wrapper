@@ -9,6 +9,7 @@ from .daisy import AsyncDaisyClient, DaisyClient
 from .exceptions import AuthenticationError
 from .handledning import AsyncHandledningClient, HandledningClient
 from .mail import AsyncMailClient, MailClient
+from .play import AsyncPlayClient, PlayClient
 
 
 class DSVClient:
@@ -53,6 +54,7 @@ class DSVClient:
         self._actlab: ACTLabClient | None = None
         self._clickmap: ClickmapClient | None = None
         self._mail: MailClient | None = None
+        self._play: PlayClient | None = None
         self.daisy_service = daisy_service
 
     @property
@@ -135,6 +137,22 @@ class DSVClient:
             )
         return self._mail
 
+    @property
+    def play(self) -> PlayClient:
+        """Get Play client (lazy initialization).
+
+        Returns:
+            PlayClient instance
+        """
+        if self._play is None:
+            self._play = PlayClient(
+                username=self.username,
+                password=self.password,
+                cache_backend=self.cache_backend,
+                cache_ttl=self.cache_ttl,
+            )
+        return self._play
+
     def close(self) -> None:
         """Close all client sessions."""
         if self._daisy is not None:
@@ -147,6 +165,8 @@ class DSVClient:
             self._clickmap.close()
         if self._mail is not None:
             self._mail.close()
+        if self._play is not None:
+            self._play.close()
 
     def __enter__(self):
         """Context manager entry."""
@@ -199,6 +219,7 @@ class AsyncDSVClient:
         self._actlab: AsyncACTLabClient | None = None
         self._clickmap: AsyncClickmapClient | None = None
         self._mail: AsyncMailClient | None = None
+        self._play: AsyncPlayClient | None = None
         self.daisy_service = daisy_service
 
     async def __aenter__(self):
@@ -217,6 +238,8 @@ class AsyncDSVClient:
             await self._clickmap.__aexit__(exc_type, exc_val, exc_tb)
         if self._mail is not None:
             await self._mail.__aexit__(exc_type, exc_val, exc_tb)
+        if self._play is not None:
+            await self._play.__aexit__(exc_type, exc_val, exc_tb)
 
     async def get_daisy(self) -> AsyncDaisyClient:
         """Get async Daisy client (lazy initialization).
@@ -297,3 +320,19 @@ class AsyncDSVClient:
             )
             await self._mail.__aenter__()
         return self._mail
+
+    async def get_play(self) -> AsyncPlayClient:
+        """Get async Play client (lazy initialization).
+
+        Returns:
+            AsyncPlayClient instance
+        """
+        if self._play is None:
+            self._play = AsyncPlayClient(
+                username=self.username,
+                password=self.password,
+                cache_backend=self.cache_backend,
+                cache_ttl=self.cache_ttl,
+            )
+            await self._play.__aenter__()
+        return self._play

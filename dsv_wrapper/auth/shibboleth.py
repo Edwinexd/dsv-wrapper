@@ -11,7 +11,7 @@ from .cache_backend import CacheBackend, NullCache
 
 logger = logging.getLogger(__name__)
 
-ServiceType = Literal["daisy_staff", "daisy_student", "handledning", "actlab", "clickmap"]
+ServiceType = Literal["daisy_staff", "daisy_student", "handledning", "actlab", "clickmap", "play"]
 
 
 class ShibbolethAuth:
@@ -155,6 +155,8 @@ class ShibbolethAuth:
             return "https://www2.dsv.su.se/act-lab/admin/"
         elif service == "clickmap":
             return "https://clickmap.dsv.su.se/api/"
+        elif service == "play":
+            return "https://play.dsv.su.se"
         else:
             raise ValueError(f"Unknown service type: {service}")
 

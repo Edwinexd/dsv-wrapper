@@ -174,6 +174,48 @@ def clickmap_client(credentials):
     client.close()
 
 
+@pytest.fixture
+def play_client(credentials):
+    """Create a Play client for testing.
+
+    Args:
+        credentials: Credentials fixture
+
+    Returns:
+        PlayClient: Initialized client
+    """
+    from dsv_wrapper import PlayClient
+
+    username, password = credentials
+
+    client = PlayClient(username=username, password=password)
+
+    yield client
+
+    # Cleanup
+    client.close()
+
+
+@pytest_asyncio.fixture
+async def async_play_client(credentials):
+    """Create an async Play client for testing.
+
+    Args:
+        credentials: Credentials fixture
+
+    Returns:
+        AsyncPlayClient: Initialized client
+    """
+    from dsv_wrapper import AsyncPlayClient
+
+    username, password = credentials
+
+    client = AsyncPlayClient(username=username, password=password)
+
+    async with client:
+        yield client
+
+
 @pytest_asyncio.fixture
 async def async_clickmap_client(credentials):
     """Create an async Clickmap client for testing.

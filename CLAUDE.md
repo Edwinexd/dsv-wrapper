@@ -1,9 +1,9 @@
 ## Project Status
 
-- **56 of 56 pytest tests passing** - 100% pass rate!
+- **67 of 67 pytest tests passing** - 100% pass rate!
 - **Major architecture refactor COMPLETE**: Fully migrated from requests/aiohttp to httpx
 - **Strict error handling implemented**: Silent failures replaced with explicit ParseError exceptions
-- All clients (ACTLab, Daisy, Handledning, Clickmap) now use unified httpx architecture
+- All clients (ACTLab, Daisy, Handledning, Clickmap, Play) now use unified httpx architecture
 - Sync and async clients have full API parity with automated tests to prevent de-sync
 - **All authentication and cookie issues resolved**
 - ~50% code duplication eliminated through shared parsing functions
@@ -11,6 +11,7 @@
 - Disclaimer added to README regarding AI-generated code experiment
 - **NEW: Clickmap client added** - Extract DSV office/workspace placements
 - **NEW: Mail client added** - Send and read emails via SU webmail (mail.su.se)
+- **NEW: Play client added** - Access DSVPlay presentations, transcripts, and courses
 
 ## Architecture Changes (2025-11-24)
 
@@ -131,6 +132,36 @@
   - Better error handling - clear IMAP/SMTP error codes
   - No session management or token handling needed
 
+### PlayClient (New - 2026-03-31)
+- **New client for play.dsv.su.se** - DSVPlay presentation/video platform
+- Both `PlayClient` and `AsyncPlayClient` implemented with httpx
+- **Authentication**: Shibboleth SSO (added "play" service type)
+- **Data sources**:
+  - `/user/all` (HTML) - Livewire snapshot contains user's courses
+  - `/designation/{code}` (HTML) - Livewire snapshot contains playlist ID and video UUIDs
+  - `/presentation/{uuid}` (JSON) - Presentation metadata with video sources, subtitles, JWT token
+  - `/playlist/{id}` (JSON) - Playlist items with titles and thumbnails
+  - VTT files on `play-store-prod.dsv.su.se` require `?token={jwt}` query param
+- **Models**:
+  - `PlayCourse`: Course with `code` and `name`
+  - `Presenter`: Presenter with `username` and `name`
+  - `VideoSource`: Video quality variants (`url_720p`, `url_1080p`, `poster_url`, `play_audio`)
+  - `Presentation`: Full presentation with `id`, `title`, `thumb_url`, `sources`, `subtitles`, `token`
+    - `has_subtitles` property, `video_url` property (best available URL)
+  - `TranscriptCue`: Parsed VTT entry with `start_seconds`, `end_seconds`, `text`
+    - `start_timestamp`/`end_timestamp` properties for HH:MM:SS.mmm format
+- **Client methods**:
+  - `get_courses()`: Get user's courses from DSVPlay
+  - `get_presentations(designation)`: Get all presentations for a course (uses playlist endpoint)
+  - `get_presentation(presentation_id)`: Get full presentation details (sources, subtitles, token)
+  - `get_transcript(presentation_id)`: Get parsed VTT transcript as list of cues
+  - `get_transcript_text(presentation_id)`: Get plain text transcript
+- **Parsing** (`dsv_wrapper/parsers/play.py`):
+  - Courses parsed from Livewire `wire:snapshot` JSON in HTML
+  - Playlist ID extracted from Livewire data on designation pages
+  - VTT parser handles WebVTT format with multi-line cues
+- All 11 play tests passing (4 unit + 7 integration)
+
 ### Strict Error Handling (Complete)
 - **Replaced silent failures with explicit ParseError exceptions**
 - Parsing functions now raise ParseError instead of silently continuing on errors:
@@ -161,6 +192,7 @@
 - ✅ Handledning client migration to httpx
 - ✅ **Clickmap client added** (new service - 2025-11-25)
 - ✅ **Mail client refactored to IMAP/SMTP** (2025-11-26) - Replaced fragile OWA API with standard protocols
+- ✅ **Play client added** (new service - 2026-03-31) - DSVPlay presentations, transcripts, courses
 - ✅ BaseAsyncClient removed
 - ✅ Old unified client files removed (base_unified.py, shibboleth_unified.py, actlab_unified.py)
 - ✅ requirements.txt updated (removed requests and aiohttp dependencies)
@@ -191,13 +223,14 @@
 
 ## Testing Notes
 
-- **Test coverage: 52/52 passing - 100%!**
+- **Test coverage: 67/67 passing - 100%!**
 - All authentication tests pass including invalid credentials detection
 - API parity tests verify sync/async clients have identical method signatures
-- All ACTLab, Daisy, Handledning, Clickmap, and Mail tests pass
+- All ACTLab, Daisy, Handledning, Clickmap, Mail, and Play tests pass
 - Cookie handling fixed: domain/path properly preserved in async clients
 - Enum serialization fixed: InstitutionID properly converted to value in form data
 - Clickmap tests include: placements retrieval, search, filtering, model validation, API parity
 - Mail tests include: folder info, email listing, full email retrieval, send to self, API parity
 - Mail tests now use IMAP/SMTP instead of OWA API
 - Mail send tests use `AUTOMATEDTESTSEND - {timestamp}` pattern for easy cleanup
+- Play tests include: courses, presentations listing, full presentation details, transcript, API parity
