@@ -36,6 +36,26 @@ def test_play_get_courses(play_client):
 
 
 @pytest.mark.integration
+def test_play_get_courses_by_tag(play_client):
+    """Tag-based listing should cover courses the user isn't enrolled in."""
+    courses = play_client.get_courses_by_tag("Lecture")
+
+    assert isinstance(courses, list)
+    assert len(courses) > 0, "Lecture tag should list many courses"
+
+    first = courses[0]
+    assert isinstance(first, PlayCourse)
+    assert first.code
+    assert first.name
+
+    # The tag-based listing is global-ish; it should exceed the user-scoped list.
+    user_courses = play_client.get_courses()
+    assert len(courses) >= len(user_courses)
+
+    logger.info(f"/tag/Lecture: {len(courses)} courses (user_courses={len(user_courses)})")
+
+
+@pytest.mark.integration
 def test_play_get_presentations(play_client):
     """Test getting presentations for a course."""
     courses = play_client.get_courses()

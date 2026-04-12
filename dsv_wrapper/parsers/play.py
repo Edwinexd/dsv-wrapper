@@ -16,17 +16,23 @@ from ..utils import parse_html
 logger = logging.getLogger(__name__)
 
 
-def parse_courses_from_html(html: str) -> list[PlayCourse]:
-    """Parse courses from /user/all page Livewire snapshot.
+def _parse_courses_from_component(html: str, component_name: str) -> list[PlayCourse]:
+    """Parse the `courses` filter of a named Livewire component.
+
+    Many pages (user/all, tag/{tag}, study/all, ...) embed a Livewire component
+    whose `data.courses` field is a dict of `{code: full_name}` for every
+    course visible under that page's scope.
 
     Args:
-        html: HTML content of the /user/all page
+        html: HTML content of the page
+        component_name: Livewire component name (from snapshot's ``memo.name``),
+            e.g. "my.user-presentations" or "search.tag-results"
 
     Returns:
         List of PlayCourse objects
 
     Raises:
-        ParseError: If parsing fails
+        ParseError: If the component or its courses field is not found
     """
     soup = parse_html(html)
 
@@ -37,7 +43,7 @@ def parse_courses_from_html(html: str) -> list[PlayCourse]:
             continue
 
         name = snap.get("memo", {}).get("name", "")
-        if name != "my.user-presentations":
+        if name != component_name:
             continue
 
         data = snap.get("data", {})
@@ -52,10 +58,49 @@ def parse_courses_from_html(html: str) -> list[PlayCourse]:
                 continue
             courses.append(PlayCourse(code=code, name=full_name))
 
-        logger.info(f"Parsed {len(courses)} courses from user presentations page")
+        logger.info(
+            f"Parsed {len(courses)} courses from Livewire component {component_name!r}"
+        )
         return courses
 
-    raise ParseError("Could not find course data in Livewire snapshot on /user/all page")
+    raise ParseError(
+        f"Could not find course data in Livewire component {component_name!r}"
+    )
+
+
+def parse_courses_from_html(html: str) -> list[PlayCourse]:
+    """Parse courses from the /user/all page Livewire snapshot.
+
+    Args:
+        html: HTML content of the /user/all page
+
+    Returns:
+        List of PlayCourse objects
+
+    Raises:
+        ParseError: If parsing fails
+    """
+    return _parse_courses_from_component(html, "my.user-presentations")
+
+
+def parse_courses_from_tag_html(html: str) -> list[PlayCourse]:
+    """Parse courses from a /tag/{tag} page Livewire snapshot.
+
+    The tag-results component's ``courses`` field enumerates every course that
+    has at least one presentation matching the tag. Unioning across broad tags
+    such as ``Lecture`` and ``Föreläsning`` yields a near-complete catalog of
+    designations hosted on play.dsv.su.se.
+
+    Args:
+        html: HTML content of the /tag/{tag} page
+
+    Returns:
+        List of PlayCourse objects
+
+    Raises:
+        ParseError: If parsing fails
+    """
+    return _parse_courses_from_component(html, "search.tag-results")
 
 
 def parse_playlist_id_from_html(html: str) -> int | None:

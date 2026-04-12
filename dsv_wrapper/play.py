@@ -11,6 +11,7 @@ from .exceptions import AuthenticationError, NetworkError, ParseError
 from .models.play import PlayCourse, Presentation, TranscriptCue
 from .parsers.play import (
     parse_courses_from_html,
+    parse_courses_from_tag_html,
     parse_playlist_id_from_html,
     parse_playlist_json,
     parse_presentation_ids_from_html,
@@ -99,6 +100,39 @@ class PlayClient:
             raise NetworkError(f"Failed to fetch courses: {e}") from e
 
         return parse_courses_from_html(response.text)
+
+    def get_courses_by_tag(self, tag: str) -> list[PlayCourse]:
+        """Get all courses that have at least one presentation tagged ``tag``.
+
+        Unlike :meth:`get_courses`, this is not user-scoped: it reflects every
+        course visible on ``/tag/{tag}``, including ones the authenticated user
+        is not enrolled in. Unioning across broad tags like ``Lecture`` and
+        ``Föreläsning`` yields a near-complete designation catalog.
+
+        Args:
+            tag: Tag name (e.g. ``"Lecture"`` or ``"Föreläsning"``). Non-ASCII
+                characters are URL-encoded automatically.
+
+        Returns:
+            List of PlayCourse objects
+
+        Raises:
+            NetworkError: If the request fails
+            ParseError: If parsing fails
+        """
+        self._ensure_authenticated()
+
+        from urllib.parse import quote
+        url = f"{self.base_url}/tag/{quote(tag)}"
+        logger.debug(f"Fetching courses for tag {tag!r} from {url}")
+
+        try:
+            response = self._client.get(url, timeout=60)
+            response.raise_for_status()
+        except httpx.HTTPError as e:
+            raise NetworkError(f"Failed to fetch tag page: {e}") from e
+
+        return parse_courses_from_tag_html(response.text)
 
     def get_presentations(self, designation: str) -> list[Presentation]:
         """Get all presentations for a course designation.
@@ -348,6 +382,36 @@ class AsyncPlayClient:
             raise NetworkError(f"Failed to fetch courses: {e}") from e
 
         return parse_courses_from_html(response.text)
+
+    async def get_courses_by_tag(self, tag: str) -> list[PlayCourse]:
+        """Get all courses that have at least one presentation tagged ``tag``.
+
+        Not user-scoped: reflects every course visible on ``/tag/{tag}``.
+        See :meth:`PlayClient.get_courses_by_tag` for details.
+
+        Args:
+            tag: Tag name (e.g. ``"Lecture"`` or ``"Föreläsning"``).
+
+        Returns:
+            List of PlayCourse objects
+
+        Raises:
+            NetworkError: If the request fails
+            ParseError: If parsing fails
+        """
+        await self._ensure_authenticated()
+
+        from urllib.parse import quote
+        url = f"{self.base_url}/tag/{quote(tag)}"
+        logger.debug(f"Fetching courses for tag {tag!r} from {url}")
+
+        try:
+            response = await self._client.get(url, timeout=60)
+            response.raise_for_status()
+        except httpx.HTTPError as e:
+            raise NetworkError(f"Failed to fetch tag page: {e}") from e
+
+        return parse_courses_from_tag_html(response.text)
 
     async def get_presentations(self, designation: str) -> list[Presentation]:
         """Get all presentations for a course designation.
