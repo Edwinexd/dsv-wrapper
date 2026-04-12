@@ -11,7 +11,7 @@ from dsv_wrapper.models.play import (
     TranscriptCue,
     VideoSource,
 )
-from dsv_wrapper.parsers.play import parse_vtt
+from dsv_wrapper.parsers.play import parse_presentation_ids_from_html, parse_vtt
 from dsv_wrapper.play import AsyncPlayClient, PlayClient
 
 logger = logging.getLogger(__name__)
@@ -282,6 +282,35 @@ def test_presentation_model():
     no_subs = Presentation(id="test-2", title="No subs")
     assert no_subs.has_subtitles is False
     assert no_subs.video_url == ""
+
+
+def test_parse_presentation_ids_empty_designation():
+    """Empty/non-existent designation pages serialize `keys` as [] instead of {}.
+
+    Previously this raised ``AttributeError: 'list' object has no attribute 'values'``.
+    Regression guard: parsing should return an empty list without raising.
+    """
+    import json
+
+    snapshot = json.dumps(
+        {
+            "memo": {"name": "search.course-results"},
+            "data": {
+                "allVideos": [
+                    None,
+                    {
+                        "keys": [],  # empty collection -> list, not dict
+                        "class": "Illuminate\\Database\\Eloquent\\Collection",
+                        "modelClass": None,
+                        "s": "elcln",
+                    },
+                ],
+            },
+        }
+    ).replace('"', "&quot;")
+    html = f'<div wire:snapshot="{snapshot}"></div>'
+
+    assert parse_presentation_ids_from_html(html) == []
 
 
 def test_transcript_cue_timestamps():

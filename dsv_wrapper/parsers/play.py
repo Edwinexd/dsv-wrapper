@@ -162,8 +162,13 @@ def parse_presentation_ids_from_html(html: str) -> list[str]:
         all_videos = data.get("allVideos", [None, {}])
 
         if len(all_videos) > 1 and isinstance(all_videos[1], dict):
-            keys = all_videos[1].get("keys", {})
-            return list(keys.values())
+            # Populated designation: keys is a dict of {position: uuid}.
+            # Empty/unknown designation: Livewire serializes the empty
+            # collection's keys as a list ([]), which has no .values().
+            keys = all_videos[1].get("keys")
+            if isinstance(keys, dict):
+                return list(keys.values())
+            return []
 
     return []
 
