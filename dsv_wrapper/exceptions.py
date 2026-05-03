@@ -43,6 +43,18 @@ class ParseError(DSVWrapperError):
     pass
 
 
+class TranscriptNotReadyError(ParseError):
+    """Raised when a Play presentation's transcript is not yet available.
+
+    DSVPlay generates transcripts asynchronously after a recording is uploaded.
+    A presentation may have its video sources ready while its subtitles are
+    still being processed. Callers should treat this as transient and retry
+    later, distinct from ``ParseError`` for genuinely malformed responses.
+    """
+
+    pass
+
+
 class NetworkError(DSVWrapperError):
     """Raised when a network request fails."""
 

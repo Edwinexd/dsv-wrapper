@@ -7,12 +7,17 @@ import httpx
 
 from .auth import AsyncShibbolethAuth, ShibbolethAuth
 from .auth.cache_backend import CacheBackend
-from .exceptions import AuthenticationError, NetworkError, ParseError
+from .exceptions import (
+    AuthenticationError,
+    NetworkError,
+    ParseError,
+    TranscriptNotReadyError,
+)
 from .models.play import PlayCourse, Presentation, TranscriptCue
 from .parsers.play import (
     parse_courses_from_html,
     parse_courses_from_tag_html,
-    parse_playlist_id_from_html,
+    parse_playlist_ids_from_html,
     parse_playlist_json,
     parse_presentation_ids_from_html,
     parse_presentation_json,
@@ -134,23 +139,33 @@ class PlayClient:
 
         return parse_courses_from_tag_html(response.text)
 
-    def get_presentations(self, designation: str) -> list[Presentation]:
-        """Get all presentations for a course designation.
+    def get_presentations(
+        self, designation: str, terms: int | None = 1
+    ) -> list[Presentation]:
+        """Get presentations for a course designation.
 
-        First tries to use the playlist endpoint (fast, single request).
-        Falls back to extracting presentation IDs from the page and fetching
-        each individually.
+        Designations offered across multiple terms expose one playlist per
+        term (most-recent first). By default only the current term's playlist
+        is returned; pass ``terms=2`` to also include the previous term, or
+        ``terms=None`` to aggregate every term.
 
         Args:
             designation: Course designation code (e.g., 'PROG1', 'IDSV')
+            terms: Number of most-recent term playlists to include. Defaults
+                to 1 (current term only). ``None`` means "all terms".
 
         Returns:
-            List of Presentation objects (lightweight: id, title, thumb_url)
+            List of lightweight Presentation objects (id, title, thumb_url),
+            de-duplicated by id, in playlist order across the included terms.
 
         Raises:
             NetworkError: If the request fails
             ParseError: If parsing fails
+            ValueError: If ``terms`` is not a positive integer or None
         """
+        if terms is not None and terms < 1:
+            raise ValueError("terms must be a positive integer or None")
+
         self._ensure_authenticated()
 
         url = f"{self.base_url}/designation/{designation}"
@@ -164,12 +179,20 @@ class PlayClient:
 
         html = response.text
 
-        # Try playlist approach first (single request)
-        playlist_id = parse_playlist_id_from_html(html)
-        if playlist_id is not None:
-            return self._get_playlist(playlist_id)
+        playlist_ids = parse_playlist_ids_from_html(html)
+        if playlist_ids:
+            selected = playlist_ids if terms is None else playlist_ids[:terms]
+            seen: set[str] = set()
+            presentations: list[Presentation] = []
+            for pid in selected:
+                for p in self._get_playlist(pid):
+                    if p.id and p.id not in seen:
+                        seen.add(p.id)
+                        presentations.append(p)
+            return presentations
 
-        # Fallback: extract UUIDs and fetch each presentation
+        # Fallback: no playlists on the page (e.g. tag-only listing). Fetch
+        # each presentation by UUID.
         logger.debug("No playlist found, falling back to individual fetches")
         presentation_ids = parse_presentation_ids_from_html(html)
         presentations = []
@@ -218,12 +241,19 @@ class PlayClient:
 
         Raises:
             NetworkError: If the request fails
-            ParseError: If the VTT content is invalid or no subtitles available
+            TranscriptNotReadyError: If the recording exists but its transcript
+                has not yet been generated. Callers should retry later. This
+                is a subclass of ``ParseError`` for backwards compatibility.
+            ParseError: If the VTT content is malformed
         """
         presentation = self.get_presentation(presentation_id)
 
         if not presentation.subtitles:
-            raise ParseError(f"Presentation {presentation_id} has no subtitles")
+            raise TranscriptNotReadyError(
+                f"Presentation {presentation_id} has no subtitles available "
+                f"(is_video_ready={presentation.is_video_ready}); "
+                "transcript may still be processing"
+            )
 
         # Use the first available subtitle track
         label = next(iter(presentation.subtitles))
@@ -413,23 +443,29 @@ class AsyncPlayClient:
 
         return parse_courses_from_tag_html(response.text)
 
-    async def get_presentations(self, designation: str) -> list[Presentation]:
-        """Get all presentations for a course designation.
+    async def get_presentations(
+        self, designation: str, terms: int | None = 1
+    ) -> list[Presentation]:
+        """Get presentations for a course designation.
 
-        First tries to use the playlist endpoint (fast, single request).
-        Falls back to extracting presentation IDs from the page and fetching
-        each individually.
+        See :meth:`PlayClient.get_presentations` for semantics.
 
         Args:
             designation: Course designation code (e.g., 'PROG1', 'IDSV')
+            terms: Number of most-recent term playlists to include. Defaults
+                to 1 (current term only). ``None`` means "all terms".
 
         Returns:
-            List of Presentation objects (lightweight: id, title, thumb_url)
+            List of lightweight Presentation objects, deduplicated by id.
 
         Raises:
             NetworkError: If the request fails
             ParseError: If parsing fails
+            ValueError: If ``terms`` is not a positive integer or None
         """
+        if terms is not None and terms < 1:
+            raise ValueError("terms must be a positive integer or None")
+
         await self._ensure_authenticated()
 
         url = f"{self.base_url}/designation/{designation}"
@@ -443,12 +479,18 @@ class AsyncPlayClient:
 
         html = response.text
 
-        # Try playlist approach first (single request)
-        playlist_id = parse_playlist_id_from_html(html)
-        if playlist_id is not None:
-            return await self._get_playlist(playlist_id)
+        playlist_ids = parse_playlist_ids_from_html(html)
+        if playlist_ids:
+            selected = playlist_ids if terms is None else playlist_ids[:terms]
+            seen: set[str] = set()
+            presentations: list[Presentation] = []
+            for pid in selected:
+                for p in await self._get_playlist(pid):
+                    if p.id and p.id not in seen:
+                        seen.add(p.id)
+                        presentations.append(p)
+            return presentations
 
-        # Fallback: extract UUIDs and fetch each presentation
         logger.debug("No playlist found, falling back to individual fetches")
         presentation_ids = parse_presentation_ids_from_html(html)
         presentations = []
@@ -497,12 +539,19 @@ class AsyncPlayClient:
 
         Raises:
             NetworkError: If the request fails
-            ParseError: If the VTT content is invalid or no subtitles available
+            TranscriptNotReadyError: If the recording exists but its transcript
+                has not yet been generated. Callers should retry later. This
+                is a subclass of ``ParseError`` for backwards compatibility.
+            ParseError: If the VTT content is malformed
         """
         presentation = await self.get_presentation(presentation_id)
 
         if not presentation.subtitles:
-            raise ParseError(f"Presentation {presentation_id} has no subtitles")
+            raise TranscriptNotReadyError(
+                f"Presentation {presentation_id} has no subtitles available "
+                f"(is_video_ready={presentation.is_video_ready}); "
+                "transcript may still be processing"
+            )
 
         label = next(iter(presentation.subtitles))
         vtt_url = presentation.subtitles[label]

@@ -25,6 +25,7 @@ from .exceptions import (
     QueueError,
     RoomNotAvailableError,
     SessionExpiredError,
+    TranscriptNotReadyError,
     ValidationError,
 )
 from .handledning import AsyncHandledningClient, HandledningClient
@@ -148,6 +149,7 @@ __all__ = [
     "RoomNotAvailableError",
     "InvalidTimeSlotError",
     "ParseError",
+    "TranscriptNotReadyError",
     "NetworkError",
     "HandledningError",
     "QueueError",

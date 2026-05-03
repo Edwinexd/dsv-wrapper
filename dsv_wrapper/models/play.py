@@ -56,8 +56,34 @@ class Presentation(BaseModel):
 
     @property
     def has_subtitles(self) -> bool:
-        """Check if this presentation has subtitles available."""
+        """Check if this presentation has subtitles available.
+
+        DSVPlay generates subtitles asynchronously, so a freshly uploaded
+        recording may have ``has_subtitles == False`` and only flip to True
+        once auto-transcription finishes.
+        """
         return bool(self.subtitles)
+
+    @property
+    def is_video_ready(self) -> bool:
+        """Check if at least one video source has a playable URL.
+
+        Newly uploaded presentations may have ``sources == {}`` while encoding
+        is still in progress. Once any source exposes a 720p or 1080p URL, the
+        video is considered ready to play.
+        """
+        return any(s.url_720p or s.url_1080p for s in self.sources.values())
+
+    @property
+    def is_processing(self) -> bool:
+        """Check whether the recording is still being processed.
+
+        True when the video has not finished encoding (no sources) or the
+        transcript has not yet been generated (no subtitles). Callers fetching
+        transcripts should treat this as a "not ready, retry later" signal
+        rather than a permanent error.
+        """
+        return not (self.is_video_ready and self.has_subtitles)
 
     @property
     def video_url(self) -> str:

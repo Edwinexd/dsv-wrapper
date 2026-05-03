@@ -5,13 +5,18 @@ import logging
 
 import pytest
 
+from dsv_wrapper.exceptions import TranscriptNotReadyError
 from dsv_wrapper.models.play import (
     PlayCourse,
     Presentation,
     TranscriptCue,
     VideoSource,
 )
-from dsv_wrapper.parsers.play import parse_presentation_ids_from_html, parse_vtt
+from dsv_wrapper.parsers.play import (
+    parse_playlist_ids_from_html,
+    parse_presentation_ids_from_html,
+    parse_vtt,
+)
 from dsv_wrapper.play import AsyncPlayClient, PlayClient
 
 logger = logging.getLogger(__name__)
@@ -277,11 +282,74 @@ def test_presentation_model():
 
     assert presentation.has_subtitles is True
     assert presentation.video_url == "https://example.com/1080.mp4"
+    assert presentation.is_video_ready is True
+    assert presentation.is_processing is False
 
     # Test without subtitles
     no_subs = Presentation(id="test-2", title="No subs")
     assert no_subs.has_subtitles is False
     assert no_subs.video_url == ""
+    assert no_subs.is_video_ready is False
+    assert no_subs.is_processing is True
+
+    # Sources present but transcript still pending (typical post-upload state)
+    transcript_pending = Presentation(
+        id="test-3",
+        title="Sources only",
+        sources={"main": source},
+    )
+    assert transcript_pending.is_video_ready is True
+    assert transcript_pending.has_subtitles is False
+    assert transcript_pending.is_processing is True
+
+    # Empty source dict shouldn't be considered ready
+    empty_source = VideoSource()
+    not_ready = Presentation(id="test-4", title="Encoding", sources={"main": empty_source})
+    assert not_ready.is_video_ready is False
+    assert not_ready.is_processing is True
+
+
+def test_transcript_not_ready_error_is_parse_error():
+    """TranscriptNotReadyError must subclass ParseError so existing
+    ``except ParseError`` blocks keep working, while callers who care about
+    the transient state can catch the subclass specifically.
+    """
+    from dsv_wrapper.exceptions import ParseError
+
+    err = TranscriptNotReadyError("not ready")
+    assert isinstance(err, ParseError)
+
+
+def test_parse_playlist_ids_returns_all_terms():
+    """A multi-term designation exposes one playlist id per term; the parser
+    must return all of them in page order (most-recent first), not just the
+    latest.
+    """
+    import json
+
+    snapshot = json.dumps(
+        {
+            "memo": {"name": "search.course-results"},
+            "data": {
+                "videos": [
+                    {
+                        "7620": [],
+                        "7464": [],
+                        "7292": [],
+                    },
+                    {"s": "arr"},
+                ],
+            },
+        }
+    ).replace('"', "&quot;")
+    html = f'<div wire:snapshot="{snapshot}"></div>'
+
+    assert parse_playlist_ids_from_html(html) == [7620, 7464, 7292]
+
+
+def test_parse_playlist_ids_no_videos():
+    """Pages without a course-results component yield an empty list."""
+    assert parse_playlist_ids_from_html("<html></html>") == []
 
 
 def test_parse_presentation_ids_empty_designation():

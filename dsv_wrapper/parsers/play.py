@@ -103,14 +103,20 @@ def parse_courses_from_tag_html(html: str) -> list[PlayCourse]:
     return _parse_courses_from_component(html, "search.tag-results")
 
 
-def parse_playlist_id_from_html(html: str) -> int | None:
-    """Parse playlist ID from /designation/{code} page Livewire snapshot.
+def parse_playlist_ids_from_html(html: str) -> list[int]:
+    """Parse all playlist IDs from a /designation/{code} page Livewire snapshot.
+
+    A designation that has been offered across multiple terms exposes one
+    playlist per term in the ``videos`` map. The keys of that map are the
+    playlist IDs, ordered most-recent-first by the page. This function returns
+    them all so callers can aggregate presentations across every term, not just
+    the latest one.
 
     Args:
         html: HTML content of a designation page
 
     Returns:
-        Playlist ID or None if not found
+        List of playlist IDs (empty if none found)
     """
     soup = parse_html(html)
 
@@ -127,14 +133,18 @@ def parse_playlist_id_from_html(html: str) -> int | None:
         data = snap.get("data", {})
         videos = data.get("videos", [{}])
 
-        if isinstance(videos[0], dict):
-            for playlist_id in videos[0]:
-                try:
-                    return int(playlist_id)
-                except (ValueError, TypeError):
-                    continue
+        if not isinstance(videos[0], dict):
+            continue
 
-    return None
+        playlist_ids = []
+        for raw_id in videos[0]:
+            try:
+                playlist_ids.append(int(raw_id))
+            except (ValueError, TypeError):
+                continue
+        return playlist_ids
+
+    return []
 
 
 def parse_presentation_ids_from_html(html: str) -> list[str]:
@@ -233,10 +243,10 @@ def parse_playlist_json(data: dict) -> list[Presentation]:
     for item in data.get("items", []):
         presentations.append(
             Presentation(
-                id=item.get("id", ""),
-                title=item.get("title", ""),
-                title_en=item.get("title_en", ""),
-                thumb_url=item.get("thumb", ""),
+                id=item.get("id") or "",
+                title=item.get("title") or "",
+                title_en=item.get("title_en") or "",
+                thumb_url=item.get("thumb") or "",
                 description=item.get("description") or "",
             )
         )
