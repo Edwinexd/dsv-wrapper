@@ -5,7 +5,11 @@ import logging
 
 import pytest
 
-from dsv_wrapper.exceptions import TranscriptNotReadyError
+from dsv_wrapper.exceptions import (
+    ParseError,
+    PresentationNotReadyError,
+    TranscriptNotReadyError,
+)
 from dsv_wrapper.models.play import (
     PlayCourse,
     Presentation,
@@ -15,6 +19,7 @@ from dsv_wrapper.models.play import (
 from dsv_wrapper.parsers.play import (
     parse_playlist_ids_from_html,
     parse_presentation_ids_from_html,
+    parse_presentation_json,
     parse_vtt,
 )
 from dsv_wrapper.play import AsyncPlayClient, PlayClient
@@ -309,15 +314,111 @@ def test_presentation_model():
     assert not_ready.is_processing is True
 
 
-def test_transcript_not_ready_error_is_parse_error():
-    """TranscriptNotReadyError must subclass ParseError so existing
-    ``except ParseError`` blocks keep working, while callers who care about
-    the transient state can catch the subclass specifically.
-    """
-    from dsv_wrapper.exceptions import ParseError
+def test_not_ready_exception_hierarchy():
+    """The "not ready yet" exception family must form a chain so callers can
+    pick their granularity:
 
-    err = TranscriptNotReadyError("not ready")
-    assert isinstance(err, ParseError)
+    * ``except TranscriptNotReadyError`` — only the captions-pending case
+      (video sources are ready, subtitles aren't).
+    * ``except PresentationNotReadyError`` — both the captions-pending case
+      *and* the broader "recording itself not yet processed" case.
+    * ``except ParseError`` — all parse failures including the above.
+    """
+    transcript_err = TranscriptNotReadyError("captions pending")
+    presentation_err = PresentationNotReadyError("recording still encoding")
+
+    # TranscriptNotReady is the most specific case.
+    assert isinstance(transcript_err, PresentationNotReadyError)
+    assert isinstance(transcript_err, ParseError)
+
+    # PresentationNotReady is the broader case but does NOT imply transcript
+    # specifically — code that only wants the captions-pending branch must
+    # check the subclass.
+    assert isinstance(presentation_err, ParseError)
+    assert not isinstance(presentation_err, TranscriptNotReadyError)
+
+
+def test_parse_presentation_json_non_dict_response_signals_not_ready():
+    """When DSVPlay's ``/presentation/{uuid}`` endpoint returns something
+    other than a JSON object (observed in production: a list), the recording
+    is still being processed. The parser must surface that as the
+    transient-retry exception, not a generic ``AttributeError`` from a
+    ``.get()`` call on the wrong type.
+
+    Regression guard: previously raised
+    ``AttributeError: 'list' object has no attribute 'get'`` and the hourly
+    transcript fetcher would mark the document as permanently failed.
+    """
+    with pytest.raises(PresentationNotReadyError):
+        parse_presentation_json([])
+
+    with pytest.raises(PresentationNotReadyError):
+        parse_presentation_json([{"error": "still processing"}])
+
+    with pytest.raises(PresentationNotReadyError):
+        parse_presentation_json(None)
+
+
+def test_parse_presentation_json_missing_id_signals_not_ready():
+    """An object envelope without an ``id`` field is also "not ready" rather
+    than a malformed-data ParseError; the latter would be swallowed-and-failed
+    by callers, the former is retried on the next run.
+    """
+    with pytest.raises(PresentationNotReadyError):
+        parse_presentation_json({})
+
+    with pytest.raises(PresentationNotReadyError):
+        parse_presentation_json({"title": "still encoding"})
+
+
+def test_parse_presentation_json_handles_empty_collections_as_lists():
+    """Livewire/Eloquent serialise empty collections as ``[]`` rather than
+    ``{}``. ``sources`` and ``subtitles`` must tolerate that without raising.
+
+    Sibling regression to ``test_parse_presentation_ids_empty_designation``.
+    """
+    presentation = parse_presentation_json(
+        {
+            "id": "abc-123",
+            "title": "Empty collections",
+            "sources": [],
+            "subtitles": [],
+            "thumb": "",
+            "token": "jwt",
+        }
+    )
+
+    assert presentation.id == "abc-123"
+    assert presentation.sources == {}
+    assert presentation.subtitles == {}
+    assert presentation.has_subtitles is False
+
+
+def test_parse_presentation_json_happy_path():
+    """Sanity check that the not-ready guards didn't break the normal path."""
+    presentation = parse_presentation_json(
+        {
+            "id": "abc-123",
+            "title": "Lecture 1",
+            "sources": {
+                "main": {
+                    "video": {"720": "https://e/720.mp4", "1080": "https://e/1080.mp4"},
+                    "poster": "https://e/poster.jpg",
+                    "playAudio": True,
+                }
+            },
+            "subtitles": {"Generated": "https://e/subs.vtt"},
+            "thumb": "https://e/thumb.jpg",
+            "token": "jwt-token",
+        }
+    )
+
+    assert presentation.id == "abc-123"
+    assert presentation.title == "Lecture 1"
+    assert "main" in presentation.sources
+    assert presentation.sources["main"].url_1080p == "https://e/1080.mp4"
+    assert presentation.subtitles == {"Generated": "https://e/subs.vtt"}
+    assert presentation.token == "jwt-token"
 
 
 def test_parse_playlist_ids_returns_all_terms():

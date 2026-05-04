@@ -4,7 +4,7 @@ import json
 import logging
 import re
 
-from ..exceptions import ParseError
+from ..exceptions import ParseError, PresentationNotReadyError
 from ..models.play import (
     PlayCourse,
     Presentation,
@@ -58,14 +58,10 @@ def _parse_courses_from_component(html: str, component_name: str) -> list[PlayCo
                 continue
             courses.append(PlayCourse(code=code, name=full_name))
 
-        logger.info(
-            f"Parsed {len(courses)} courses from Livewire component {component_name!r}"
-        )
+        logger.info(f"Parsed {len(courses)} courses from Livewire component {component_name!r}")
         return courses
 
-    raise ParseError(
-        f"Could not find course data in Livewire component {component_name!r}"
-    )
+    raise ParseError(f"Could not find course data in Livewire component {component_name!r}")
 
 
 def parse_courses_from_html(html: str) -> list[PlayCourse]:
@@ -183,42 +179,63 @@ def parse_presentation_ids_from_html(html: str) -> list[str]:
     return []
 
 
-def parse_presentation_json(data: dict) -> Presentation:
+def parse_presentation_json(data: object) -> Presentation:
     """Parse presentation from /presentation/{uuid} JSON response.
 
     Args:
-        data: JSON response dict
+        data: JSON response. Normally a dict; while a recording is still being
+            processed Play has been observed to return a non-dict shape
+            (e.g. a list), in which case ``PresentationNotReadyError`` is
+            raised so callers can retry later.
 
     Returns:
         Presentation object
 
     Raises:
-        ParseError: If required fields are missing
+        PresentationNotReadyError: If the response shape suggests the
+            recording hasn't finished processing yet (non-dict envelope, or
+            envelope missing the ``id`` field).
+        ParseError: If required fields are otherwise malformed.
     """
+    if not isinstance(data, dict):
+        raise PresentationNotReadyError(
+            f"Presentation response is not a JSON object "
+            f"(got {type(data).__name__}); recording may still be processing"
+        )
+
     presentation_id = data.get("id")
     if not presentation_id:
-        raise ParseError("Presentation JSON missing 'id' field")
+        raise PresentationNotReadyError(
+            "Presentation response missing 'id' field; recording may still be processing"
+        )
 
     title = data.get("title", "")
 
-    # Parse sources
+    # Parse sources. Livewire/Eloquent serialises empty collections as `[]`
+    # rather than `{}`, so guard the dict assumption.
     sources = {}
-    for source_name, source_data in data.get("sources", {}).items():
-        if not isinstance(source_data, dict):
-            continue
+    raw_sources = data.get("sources", {})
+    if isinstance(raw_sources, dict):
+        for source_name, source_data in raw_sources.items():
+            if not isinstance(source_data, dict):
+                continue
 
-        video = source_data.get("video", {})
-        sources[source_name] = VideoSource(
-            url_720p=video.get("720", ""),
-            url_1080p=video.get("1080", ""),
-            poster_url=source_data.get("poster", ""),
-            play_audio=source_data.get("playAudio", False),
-        )
+            video = source_data.get("video", {})
+            if not isinstance(video, dict):
+                video = {}
+            sources[source_name] = VideoSource(
+                url_720p=video.get("720", ""),
+                url_1080p=video.get("1080", ""),
+                poster_url=source_data.get("poster", ""),
+                play_audio=source_data.get("playAudio", False),
+            )
 
-    # Parse subtitles
+    # Parse subtitles. Same empty-collection-as-list guard as `sources`.
     subtitles = {}
-    for label, url in data.get("subtitles", {}).items():
-        subtitles[label] = url
+    raw_subtitles = data.get("subtitles", {})
+    if isinstance(raw_subtitles, dict):
+        for label, url in raw_subtitles.items():
+            subtitles[label] = url
 
     return Presentation(
         id=presentation_id,

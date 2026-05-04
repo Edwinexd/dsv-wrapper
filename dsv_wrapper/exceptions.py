@@ -43,13 +43,31 @@ class ParseError(DSVWrapperError):
     pass
 
 
-class TranscriptNotReadyError(ParseError):
+class PresentationNotReadyError(ParseError):
+    """Raised when a Play presentation isn't ready for downstream consumption.
+
+    DSVPlay processes uploads asynchronously: video encoding runs first, then
+    auto-captioning. While a recording is still being processed the
+    ``/presentation/{uuid}`` endpoint may return a response shape that doesn't
+    match the normal "ready" envelope (for example, a list instead of the
+    expected object). Callers should treat this as transient and retry later.
+
+    Subclassed by :class:`TranscriptNotReadyError` for the more specific case
+    where the video itself is ready but subtitles haven't been generated yet.
+    Code that wants to handle either case the same way should catch this class.
+    """
+
+    pass
+
+
+class TranscriptNotReadyError(PresentationNotReadyError):
     """Raised when a Play presentation's transcript is not yet available.
 
     DSVPlay generates transcripts asynchronously after a recording is uploaded.
     A presentation may have its video sources ready while its subtitles are
     still being processed. Callers should treat this as transient and retry
-    later, distinct from ``ParseError`` for genuinely malformed responses.
+    later. Subclass of :class:`PresentationNotReadyError` (and transitively
+    :class:`ParseError`) so existing ``except ParseError`` blocks keep working.
     """
 
     pass
