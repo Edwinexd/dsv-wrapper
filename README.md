@@ -15,6 +15,7 @@ For questions or concerns regarding this project, please contact: edwinsu@dsv.su
 - **Handledning Integration**: Lab supervision queue management
 - **Clickmap Integration**: DSV office/workspace placement lookup
 - **Mail Integration**: Send and read emails via SU webmail (mail.su.se)
+- **Play Integration**: List DSVPlay courses/presentations, fetch transcripts, enumerate and download mp4 tracks
 - **Sync & Async**: Both synchronous and asynchronous APIs
 - **Type Safe**: Pydantic models for all data structures
 - **Python 3.12+**: Modern Python with latest features
@@ -161,6 +162,34 @@ with MailClient(username="user", password="pass") as mail:
         print(f"Failed to send: {result.error}")
 ```
 
+#### Play Client
+
+```python
+from dsv_wrapper import PlayClient
+
+with PlayClient(username="user", password="pass") as play:
+    # Discover content
+    courses = play.get_courses()
+    presentations = play.get_presentations(courses[0].code)
+    transcript = play.get_transcript_text(presentations[0].id)
+
+    # Enumerate mp4 tracks. The returned TrackInfo carries no URLs — every
+    # track is addressable only through (presentation_uuid, track_index)
+    # within the same authenticated session, so the SSO session never
+    # leaves the library.
+    tracks = play.get_media_tracks(presentations[0].id)
+    for t in tracks:
+        size_mb = (t.size_bytes or 0) / 1024 / 1024
+        print(f"  idx={t.index} {t.height}p {size_mb:.1f} MB ({t.mime_type})")
+
+    # Cheap moov-atom probe (~2 MiB) before committing to a full download
+    # — play-store-prod.dsv.su.se honours HTTP Range headers.
+    head = b"".join(play.stream_track(presentations[0].id, 0, end_byte=2 * 1024 * 1024 - 1))
+
+    # Stream the chosen track to disk in 1 MiB chunks.
+    play.download_track(presentations[0].id, 0, "/tmp/lecture.mp4")
+```
+
 #### Clickmap Client
 
 ```python
@@ -280,6 +309,8 @@ from dsv_wrapper.models import (
     # Mail models
     MailFolder, EmailMessage, EmailAddress, SendEmailResult,
     BodyType, Importance,
+    # Play models
+    PlayCourse, Presentation, TrackInfo, TranscriptCue, VideoSource,
 )
 
 # Room enums with specific IDs

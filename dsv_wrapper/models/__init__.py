@@ -50,7 +50,7 @@ from .mail import (
 )
 
 # Play models
-from .play import PlayCourse, Presentation, Presenter, TranscriptCue, VideoSource
+from .play import PlayCourse, Presentation, Presenter, TrackInfo, TranscriptCue, VideoSource
 
 __all__ = [
     # Common models
@@ -85,6 +85,7 @@ __all__ = [
     "Presenter",
     "VideoSource",
     "Presentation",
+    "TrackInfo",
     "TranscriptCue",
     # Mail models
     "BodyType",

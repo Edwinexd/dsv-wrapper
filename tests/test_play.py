@@ -2,6 +2,8 @@
 
 import inspect
 import logging
+import tempfile
+from pathlib import Path
 
 import pytest
 
@@ -13,10 +15,12 @@ from dsv_wrapper.exceptions import (
 from dsv_wrapper.models.play import (
     PlayCourse,
     Presentation,
+    TrackInfo,
     TranscriptCue,
     VideoSource,
 )
 from dsv_wrapper.parsers.play import (
+    enumerate_track_descriptors,
     parse_playlist_ids_from_html,
     parse_presentation_ids_from_html,
     parse_presentation_json,
@@ -488,3 +492,244 @@ def test_transcript_cue_timestamps():
 
     assert cue.start_timestamp == "01:01:01.500"
     assert cue.end_timestamp == "01:01:05.123"
+
+
+def test_enumerate_track_descriptors_orders_sources_then_quality():
+    """Track enumeration must be deterministic: source insertion order outer,
+    720p before 1080p inner. Empty URLs are skipped so callers don't get
+    holes in the index space.
+    """
+    presentation = Presentation(
+        id="abc",
+        title="t",
+        sources={
+            "main": VideoSource(
+                url_720p="https://e/main-720.mp4",
+                url_1080p="https://e/main-1080.mp4",
+            ),
+            "right": VideoSource(url_1080p="https://e/right-1080.mp4"),
+            "left": VideoSource(url_720p="https://e/left-720.mp4"),
+        },
+        token="jwt",
+    )
+
+    descriptors = enumerate_track_descriptors(presentation)
+    assert descriptors == [
+        ("https://e/main-720.mp4", "main", 720),
+        ("https://e/main-1080.mp4", "main", 1080),
+        ("https://e/right-1080.mp4", "right", 1080),
+        ("https://e/left-720.mp4", "left", 720),
+    ]
+
+
+def test_enumerate_track_descriptors_empty_sources():
+    """A presentation with no sources yields no descriptors (not a crash)."""
+    presentation = Presentation(id="abc", title="t")
+    assert enumerate_track_descriptors(presentation) == []
+
+
+def test_track_info_model_all_fields_optional():
+    """All metadata fields except ``index`` are optional — populated only when
+    cheaply available. Callers that need width/duration can probe the moov
+    atom themselves via ``stream_track``.
+    """
+    track = TrackInfo(index=0)
+    assert track.duration_seconds is None
+    assert track.width is None
+    assert track.height is None
+    assert track.size_bytes is None
+    assert track.mime_type is None
+
+    full = TrackInfo(
+        index=3,
+        duration_seconds=1234.5,
+        width=1920,
+        height=1080,
+        size_bytes=987654321,
+        mime_type="video/mp4",
+    )
+    assert full.index == 3
+    assert full.height == 1080
+    assert full.size_bytes == 987654321
+
+
+@pytest.mark.integration
+def test_play_get_media_tracks(play_client):
+    """Enumerate tracks for the first ready presentation we can find.
+
+    Track indexes must be 0..N-1 with no gaps. ``size_bytes`` must come back
+    populated (the play-store CDN reports ``content-length`` on HEAD).
+    URLs must NOT leak into the returned model — TrackInfo has no URL field
+    by design, but we sanity-check that none of the string fields contain
+    the play-store hostname either.
+    """
+    courses = play_client.get_courses()
+
+    presentation_id = None
+    for c in courses[:5]:
+        try:
+            presentations = play_client.get_presentations(c.code)
+        except (ParseError, PresentationNotReadyError):
+            continue
+        for p in presentations[:5]:
+            try:
+                full = play_client.get_presentation(p.id)
+            except (ParseError, PresentationNotReadyError):
+                continue
+            if full.is_video_ready:
+                presentation_id = p.id
+                break
+        if presentation_id:
+            break
+
+    if not presentation_id:
+        pytest.skip("No ready presentations found")
+
+    tracks = play_client.get_media_tracks(presentation_id)
+
+    assert isinstance(tracks, list)
+    assert len(tracks) > 0, "A ready presentation must expose at least one track"
+    assert [t.index for t in tracks] == list(range(len(tracks)))
+
+    for t in tracks:
+        assert isinstance(t, TrackInfo)
+        assert t.size_bytes is not None and t.size_bytes > 0
+        assert t.mime_type == "video/mp4"
+        assert t.height in (720, 1080)
+        # Defensive: the contract is "no URLs in the return". TrackInfo has
+        # no string fields that could carry one, but verify nothing slipped
+        # into the model dump either.
+        for v in t.model_dump().values():
+            if isinstance(v, str):
+                assert "play-store" not in v
+                assert "https://" not in v
+
+    logger.info(f"Presentation {presentation_id}: {len(tracks)} tracks")
+    for t in tracks:
+        logger.info(f"  idx={t.index} h={t.height} size={t.size_bytes} mime={t.mime_type}")
+
+
+@pytest.mark.integration
+def test_play_stream_track_range_returns_requested_slice(play_client):
+    """``stream_track`` with a byte range must return exactly the requested
+    number of bytes. This is the cheap moov-atom-probe path callers depend
+    on for track selection without a full multi-GB download.
+    """
+    courses = play_client.get_courses()
+
+    presentation_id = None
+    for c in courses[:5]:
+        try:
+            presentations = play_client.get_presentations(c.code)
+        except (ParseError, PresentationNotReadyError):
+            continue
+        for p in presentations[:5]:
+            try:
+                full = play_client.get_presentation(p.id)
+            except (ParseError, PresentationNotReadyError):
+                continue
+            if full.is_video_ready:
+                presentation_id = p.id
+                break
+        if presentation_id:
+            break
+
+    if not presentation_id:
+        pytest.skip("No ready presentations found")
+
+    tracks = play_client.get_media_tracks(presentation_id)
+    assert tracks
+
+    chunks = list(play_client.stream_track(presentation_id, 0, end_byte=2047))
+    body = b"".join(chunks)
+    assert len(body) == 2048
+
+    # Mid-file slice should also work (tests the start_byte path, not just open-ended).
+    mid_chunks = list(play_client.stream_track(presentation_id, 0, start_byte=1024, end_byte=2047))
+    mid_body = b"".join(mid_chunks)
+    assert len(mid_body) == 1024
+
+
+@pytest.mark.integration
+def test_play_download_track_writes_full_byte_count(play_client):
+    """``download_track`` must write exactly ``size_bytes`` bytes to disk.
+
+    To keep the test cheap we pick the smallest ready track in the user's
+    catalog. Large recordings (multi-GB) make this skip-prone; the test is
+    skipped if we can't find a track under 200 MB.
+    """
+    courses = play_client.get_courses()
+
+    size_limit = 200 * 1024 * 1024
+    target = None
+
+    for c in courses[:5]:
+        try:
+            presentations = play_client.get_presentations(c.code)
+        except (ParseError, PresentationNotReadyError):
+            continue
+        for p in presentations[:5]:
+            try:
+                full = play_client.get_presentation(p.id)
+            except (ParseError, PresentationNotReadyError):
+                continue
+            if not full.is_video_ready:
+                continue
+            try:
+                tracks = play_client.get_media_tracks(p.id)
+            except (ParseError, PresentationNotReadyError):
+                continue
+            for t in tracks:
+                if (
+                    t.size_bytes
+                    and t.size_bytes < size_limit
+                    and (target is None or t.size_bytes < target[2])
+                ):
+                    target = (p.id, t.index, t.size_bytes)
+            if target:
+                break
+        if target:
+            break
+
+    if not target:
+        pytest.skip(f"No track under {size_limit // (1024 * 1024)} MB found")
+
+    presentation_id, track_index, expected_size = target
+    logger.info(f"Downloading {presentation_id} track {track_index} ({expected_size} bytes)")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        dest = Path(tmpdir) / "track.mp4"
+        play_client.download_track(presentation_id, track_index, dest)
+        actual = dest.stat().st_size
+        assert actual == expected_size, f"Downloaded size {actual} != HEAD size {expected_size}"
+
+
+@pytest.mark.integration
+def test_play_get_media_tracks_invalid_index(play_client):
+    """An out-of-range track index must surface as ValueError, not a
+    confusing ``KeyError`` or a stray HTTP 404 deeper in the stack.
+    """
+    courses = play_client.get_courses()
+
+    presentation_id = None
+    for c in courses[:5]:
+        try:
+            presentations = play_client.get_presentations(c.code)
+        except (ParseError, PresentationNotReadyError):
+            continue
+        for p in presentations[:3]:
+            try:
+                full = play_client.get_presentation(p.id)
+            except (ParseError, PresentationNotReadyError):
+                continue
+            if full.is_video_ready:
+                presentation_id = p.id
+                break
+        if presentation_id:
+            break
+
+    if not presentation_id:
+        pytest.skip("No ready presentations found")
+
+    with pytest.raises(ValueError):
+        list(play_client.stream_track(presentation_id, 999, end_byte=1023))

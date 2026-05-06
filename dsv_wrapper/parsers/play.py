@@ -16,6 +16,35 @@ from ..utils import parse_html
 logger = logging.getLogger(__name__)
 
 
+# Quality label -> known frame height. DSVPlay only encodes 720p and 1080p
+# variants; widths aren't published anywhere in the API and aspect ratio varies
+# across sources (lecturer camera vs. screen capture), so we leave width
+# unknown rather than guess.
+_QUALITY_HEIGHTS: dict[str, int] = {"720": 720, "1080": 1080}
+
+
+def enumerate_track_descriptors(
+    presentation: Presentation,
+) -> list[tuple[str, str, int | None]]:
+    """Flatten ``presentation.sources`` into an ordered (url, source_name, height) list.
+
+    The order is deterministic for a given presentation envelope: outer loop
+    follows ``presentation.sources`` insertion order (which mirrors the JSON
+    response), inner loop is 720p before 1080p. Empty URLs are skipped.
+
+    Used by both :class:`PlayClient` and :class:`AsyncPlayClient` to map an
+    opaque ``track_index`` back to the underlying URL without re-implementing
+    the iteration in two places.
+    """
+    descriptors: list[tuple[str, str, int | None]] = []
+    for source_name, source in presentation.sources.items():
+        for quality_label, url in (("720", source.url_720p), ("1080", source.url_1080p)):
+            if not url:
+                continue
+            descriptors.append((url, source_name, _QUALITY_HEIGHTS.get(quality_label)))
+    return descriptors
+
+
 def _parse_courses_from_component(html: str, component_name: str) -> list[PlayCourse]:
     """Parse the `courses` filter of a named Livewire component.
 

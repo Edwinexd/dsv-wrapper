@@ -97,6 +97,35 @@ class Presentation(BaseModel):
         return ""
 
 
+class TrackInfo(BaseModel):
+    """Metadata for a single mp4 track attached to a presentation.
+
+    A presentation typically has several sources (``main``, ``left``, ``right``,
+    a "Manual capture" composite, ...) and each source is encoded in one or
+    more quality variants (720p, 1080p). Each unique playable mp4 URL is
+    surfaced as one ``TrackInfo``.
+
+    The ``index`` field is opaque and only meaningful within the current
+    authenticated session — pair it with the same ``presentation_uuid`` when
+    calling :meth:`PlayClient.download_track` or
+    :meth:`PlayClient.stream_track`. It is *not* a URL and contains no
+    credentials.
+    """
+
+    index: int = Field(description="Stable position of this track in the presentation envelope")
+    duration_seconds: float | None = Field(
+        default=None, description="Track duration in seconds, when known"
+    )
+    width: int | None = Field(default=None, description="Frame width in pixels, when known")
+    height: int | None = Field(default=None, description="Frame height in pixels, when known")
+    size_bytes: int | None = Field(
+        default=None, description="Total mp4 byte size as reported by HEAD"
+    )
+    mime_type: str | None = Field(default=None, description="MIME type of the track")
+
+    model_config = {"frozen": True}
+
+
 class TranscriptCue(BaseModel):
     """A single cue/entry from a WebVTT transcript."""
 

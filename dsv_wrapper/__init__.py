@@ -1,6 +1,6 @@
 """DSV Wrapper - Reusable Python package for accessing DSV systems."""
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 # Main clients
 from .actlab import ACTLabClient, AsyncACTLabClient
@@ -62,6 +62,7 @@ from .models import (
     Staff,
     Student,
     Teacher,
+    TrackInfo,
     TranscriptCue,
     VideoSource,
 )
@@ -134,6 +135,7 @@ __all__ = [
     "Presenter",
     "VideoSource",
     "Presentation",
+    "TrackInfo",
     "TranscriptCue",
     "BodyType",
     "EmailAddress",
