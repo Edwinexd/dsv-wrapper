@@ -19,10 +19,13 @@ from .exceptions import (
     RoomNotAvailableError,
 )
 from .models import (
+    CourseStaff,
+    DaisyCourse,
     InstitutionID,
     RoomActivity,
     RoomCategory,
     Schedule,
+    Semester,
     Staff,
     Student,
 )
@@ -39,6 +42,45 @@ logger = logging.getLogger(__name__)
 
 # Default concurrency for bulk operations
 DEFAULT_MAX_CONCURRENT = 20
+
+# Daisy returns up to 20 course-search results per page
+COURSE_SEARCH_PAGE_SIZE = 20
+
+
+def _build_course_search_form(
+    *,
+    semester: Semester | None,
+    semester_from: Semester | None,
+    semester_to: Semester | None,
+    beteckning: str,
+    name: str,
+    institution_id: str | InstitutionID,
+    query_page: int,
+) -> dict[str, str]:
+    """Build POST form data for ``/sok/sokmoment.jspa``.
+
+    ``semester`` (single term) takes precedence over ``semester_from``/``semester_to``.
+    A semester value of ``None`` on either bound omits that filter, returning
+    courses across all terms available in Daisy.
+    """
+    if semester is not None:
+        semester_from = semester_to = semester
+    inst_val = institution_id.value if hasattr(institution_id, "value") else institution_id
+    form: dict[str, str] = {
+        "beteckning": beteckning or "",
+        "namn": name or "",
+        "kursID": "",
+        "searchTerm": "",
+        "momentansvID": "",
+        "institution": inst_val or "",
+        "searchInstInUnits": "true",
+        "nyckelbegrepp": "",
+        "fromTerminID": semester_from.termin_id if semester_from else "",
+        "tomTerminID": semester_to.termin_id if semester_to else "",
+    }
+    if query_page > 0:
+        form["querypage"] = str(query_page)
+    return form
 
 
 class DaisyClient:
@@ -188,23 +230,60 @@ class DaisyClient:
 
         return True
 
-    def search_students(self, query: str, limit: int = 50) -> list[Student]:
-        """Search for students by name or username.
+    def search_students(
+        self,
+        last_name: str = "",
+        first_name: str = "",
+        email: str = "",
+        username: str = "",
+        institution_id: str | InstitutionID = "",
+        page_size: int = 25,
+    ) -> list[Student]:
+        """Search for students via Daisy's ``/sok/visastudent.jspa`` form.
+
+        At least one of the name/email/username filters should be provided;
+        an unfiltered search may return tens of thousands of rows. ``hogskolaID``
+        is hardcoded to SU (``5``) for now.
 
         Args:
-            query: Search query
-            limit: Maximum number of results
+            last_name: ``efternamn`` field.
+            first_name: ``fornamn`` field.
+            email: ``epost`` field.
+            username: ``anvandarnamn`` field.
+            institution_id: ``institutionID`` field (DSV's id is ``4``).
+            page_size: Daisy page size (25/50/75/100).
 
         Returns:
-            List of Student objects
+            List of Student rows. The returned objects have ``person_id``
+            and ``profile_url`` populated but ``username=None`` – call
+            :meth:`Student.get_username` to resolve.
         """
         self._ensure_authenticated()
-
-        url = build_url(self.base_url, "search", "students", q=query, limit=limit)
-        response = self._client.get(url)
+        inst_val = institution_id.value if hasattr(institution_id, "value") else institution_id
+        form = {
+            "efternamn": last_name,
+            "fornamn": first_name,
+            "epost": email,
+            "anvandarnamn": username,
+            "hogskolaID": "5",
+            "terminID": "",
+            "institutionID": inst_val or "",
+            "kursID": "",
+            "programID": "",
+            "pageSize": str(page_size),
+            "action:sokstudent": "Sök",
+        }
+        response = self._client.post(f"{self.base_url}/sok/visastudent.jspa", data=form, timeout=30)
         response.raise_for_status()
+        return daisy_parsers.parse_students(response.text, self.base_url)
 
-        return daisy_parsers.parse_students(response.text)
+    def get_student_details(self, person_id: str) -> Student:
+        """Fetch a student's profile page and return a populated Student."""
+        self._ensure_authenticated()
+        url = f"{self.base_url}/anstalld/student/studentinfo.jspa?personID={person_id}"
+        response = self._client.get(url, timeout=15)
+        response.raise_for_status()
+        return daisy_parsers.parse_student_details(person_id, response.text, self.base_url)
 
     def get_room_activities(
         self, room_id: str, schedule_date: date | None = None
@@ -434,6 +513,98 @@ class DaisyClient:
         msg = f"Failed to download profile picture after {max_retries + 1} attempts: {last_error}"
         raise NetworkError(msg) from last_error
 
+    def get_courses(
+        self,
+        semester: Semester | None = None,
+        *,
+        semester_from: Semester | None = None,
+        semester_to: Semester | None = None,
+        beteckning: str = "",
+        name: str = "",
+        institution_id: str | InstitutionID = InstitutionID.DSV,
+        max_pages: int | None = None,
+    ) -> list[DaisyCourse]:
+        """List course offerings ("moment") in Daisy.
+
+        Auto-paginates Daisy's ``/sok/sokmoment.jspa`` search.
+
+        Args:
+            semester: Restrict to a single semester (e.g. ``Semester.from_label("VT2026")``).
+                Mutually exclusive with ``semester_from``/``semester_to``.
+            semester_from: Lower-bound semester (inclusive).
+            semester_to: Upper-bound semester (inclusive).
+            beteckning: Filter by course code substring (case-insensitive in Daisy).
+            name: Filter by course name substring.
+            institution_id: Institution scope (default DSV).
+            max_pages: Stop after this many pages of 20 results. ``None`` = all pages.
+
+        Returns:
+            List of DaisyCourse instances with search-page data populated
+            (no syllabus_url / unit – use :meth:`get_course` for that).
+        """
+        self._ensure_authenticated()
+        if semester is not None and (semester_from or semester_to):
+            raise ValueError("Pass either `semester` or `semester_from`/`semester_to`, not both")
+
+        url = f"{self.base_url}/sok/sokmoment.jspa"
+        all_courses: list[DaisyCourse] = []
+        page = 0
+        while True:
+            form = _build_course_search_form(
+                semester=semester,
+                semester_from=semester_from,
+                semester_to=semester_to,
+                beteckning=beteckning,
+                name=name,
+                institution_id=institution_id,
+                query_page=page,
+            )
+            response = self._client.post(url, data=form, timeout=30)
+            response.raise_for_status()
+            courses, range_from, range_to, total = daisy_parsers.parse_course_search(
+                response.text, self.base_url
+            )
+            all_courses.extend(courses)
+            if not courses or range_to is None or total is None or range_to >= total:
+                break
+            page += 1
+            if max_pages is not None and page >= max_pages:
+                break
+        return all_courses
+
+    def get_course(self, momenttillf_id: str | int) -> DaisyCourse:
+        """Fetch the public detail page for a course offering.
+
+        Returns a :class:`DaisyCourse` with ``ects``, ``unit``, ``syllabus_url``
+        and ``semester`` populated from the detail page. Start/end dates are
+        not on this page – they come from search results.
+        """
+        self._ensure_authenticated()
+        mid = str(momenttillf_id)
+        url = f"{self.base_url}/servlet/momentinfo.Momentinfo?id={mid}"
+        response = self._client.get(url, timeout=15)
+        response.raise_for_status()
+        return daisy_parsers.parse_course_detail(response.text, mid, self.base_url)
+
+    def get_course_participants(self, momenttillf_id: str | int) -> list[CourseStaff]:
+        """Fetch the role-grouped staff/participants list for a course offering.
+
+        Parses the *Medverkande* section of the public momentinfo page, which
+        groups people by free-text role (e.g. *Kurs-/delkursansvarig*,
+        *Examination*, *Handledare*, *Laborationsledare*, *Administration*).
+        A person appearing under multiple groups is returned once with all
+        their roles in :attr:`CourseStaff.roles`.
+
+        Works for any course in Daisy – this endpoint is not gated to the
+        course's own teaching team.
+        """
+        self._ensure_authenticated()
+        mid = str(momenttillf_id)
+        url = f"{self.base_url}/servlet/momentinfo.Momentinfo?id={mid}"
+        response = self._client.get(url, timeout=15)
+        response.raise_for_status()
+        return daisy_parsers.parse_course_participants(response.text, self.base_url)
+
     def close(self) -> None:
         """Close the client session."""
         self._client.close()
@@ -614,23 +785,44 @@ class AsyncDaisyClient:
 
         return True
 
-    async def search_students(self, query: str, limit: int = 50) -> list[Student]:
-        """Search for students by name or username.
-
-        Args:
-            query: Search query
-            limit: Maximum number of results
-
-        Returns:
-            List of Student objects
-        """
+    async def search_students(
+        self,
+        last_name: str = "",
+        first_name: str = "",
+        email: str = "",
+        username: str = "",
+        institution_id: str | InstitutionID = "",
+        page_size: int = 25,
+    ) -> list[Student]:
+        """Search for students. See :meth:`DaisyClient.search_students`."""
         await self._ensure_authenticated()
-
-        url = build_url(self.base_url, "search", "students", q=query, limit=limit)
-        response = await self._client.get(url)
+        inst_val = institution_id.value if hasattr(institution_id, "value") else institution_id
+        form = {
+            "efternamn": last_name,
+            "fornamn": first_name,
+            "epost": email,
+            "anvandarnamn": username,
+            "hogskolaID": "5",
+            "terminID": "",
+            "institutionID": inst_val or "",
+            "kursID": "",
+            "programID": "",
+            "pageSize": str(page_size),
+            "action:sokstudent": "Sök",
+        }
+        response = await self._client.post(
+            f"{self.base_url}/sok/visastudent.jspa", data=form, timeout=30
+        )
         response.raise_for_status()
+        return daisy_parsers.parse_students(response.text, self.base_url)
 
-        return daisy_parsers.parse_students(response.text)
+    async def get_student_details(self, person_id: str) -> Student:
+        """Fetch a student's profile page and return a populated Student."""
+        await self._ensure_authenticated()
+        url = f"{self.base_url}/anstalld/student/studentinfo.jspa?personID={person_id}"
+        response = await self._client.get(url, timeout=15)
+        response.raise_for_status()
+        return daisy_parsers.parse_student_details(person_id, response.text, self.base_url)
 
     async def get_room_activities(
         self, room_id: str, schedule_date: date | None = None
@@ -810,6 +1002,72 @@ class AsyncDaisyClient:
 
         logger.info(f"Completed: {len(detailed_staff)} staff members with details")
         return detailed_staff
+
+    async def get_courses(
+        self,
+        semester: Semester | None = None,
+        *,
+        semester_from: Semester | None = None,
+        semester_to: Semester | None = None,
+        beteckning: str = "",
+        name: str = "",
+        institution_id: str | InstitutionID = InstitutionID.DSV,
+        max_pages: int | None = None,
+    ) -> list[DaisyCourse]:
+        """List course offerings ("moment") in Daisy.
+
+        See :meth:`DaisyClient.get_courses` for argument details. Auto-paginates.
+        """
+        await self._ensure_authenticated()
+        if semester is not None and (semester_from or semester_to):
+            raise ValueError("Pass either `semester` or `semester_from`/`semester_to`, not both")
+
+        url = f"{self.base_url}/sok/sokmoment.jspa"
+        all_courses: list[DaisyCourse] = []
+        page = 0
+        while True:
+            form = _build_course_search_form(
+                semester=semester,
+                semester_from=semester_from,
+                semester_to=semester_to,
+                beteckning=beteckning,
+                name=name,
+                institution_id=institution_id,
+                query_page=page,
+            )
+            response = await self._client.post(url, data=form, timeout=30)
+            response.raise_for_status()
+            courses, range_from, range_to, total = daisy_parsers.parse_course_search(
+                response.text, self.base_url
+            )
+            all_courses.extend(courses)
+            if not courses or range_to is None or total is None or range_to >= total:
+                break
+            page += 1
+            if max_pages is not None and page >= max_pages:
+                break
+        return all_courses
+
+    async def get_course(self, momenttillf_id: str | int) -> DaisyCourse:
+        """Fetch the public detail page for a course offering."""
+        await self._ensure_authenticated()
+        mid = str(momenttillf_id)
+        url = f"{self.base_url}/servlet/momentinfo.Momentinfo?id={mid}"
+        response = await self._client.get(url, timeout=15)
+        response.raise_for_status()
+        return daisy_parsers.parse_course_detail(response.text, mid, self.base_url)
+
+    async def get_course_participants(self, momenttillf_id: str | int) -> list[CourseStaff]:
+        """Fetch the role-grouped staff list for a course offering.
+
+        See :meth:`DaisyClient.get_course_participants` for details.
+        """
+        await self._ensure_authenticated()
+        mid = str(momenttillf_id)
+        url = f"{self.base_url}/servlet/momentinfo.Momentinfo?id={mid}"
+        response = await self._client.get(url, timeout=15)
+        response.raise_for_status()
+        return daisy_parsers.parse_course_participants(response.text, self.base_url)
 
     async def download_profile_picture(self, url: str, max_retries: int = 3) -> bytes:
         """Download a profile picture from the given URL.

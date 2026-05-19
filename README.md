@@ -11,7 +11,7 @@ For questions or concerns regarding this project, please contact: edwinsu@dsv.su
 ## Features
 
 - **Unified Authentication**: Shibboleth SSO login with cookie caching
-- **Daisy Integration**: Room booking, schedule retrieval, student/staff search
+- **Daisy Integration**: Room booking, schedule retrieval, student/staff search, course (moment) iteration per semester with role-grouped medverkande and lazy username resolution
 - **Handledning Integration**: Lab supervision queue management
 - **Clickmap Integration**: DSV office/workspace placement lookup
 - **Mail Integration**: Send and read emails via SU webmail (mail.su.se)
@@ -67,35 +67,68 @@ with DSVClient(username="your_username", password="your_password") as client:
 #### Daisy Client
 
 ```python
-from dsv_wrapper import DaisyClient
-from dsv_wrapper.models import RoomCategory, Room, RoomTime
+from dsv_wrapper import DaisyClient, Semester, AmbiguousMatchError
+from dsv_wrapper.models import RoomCategory, Room, RoomTime, BookingSlot
 from datetime import date
 
 with DaisyClient(username="user", password="pass", service="daisy_staff") as daisy:
-    # Get room schedule
+    # Room schedule
     schedule = daisy.get_schedule(RoomCategory.BOOKABLE_GROUP_ROOMS, date.today())
-
     print(f"Schedule for {schedule.room_category_title}")
     for room_name, activities in schedule.activities.items():
         print(f"\nRoom: {room_name}")
-        for activity in activities:
-            print(f"  {activity.time_slot_start.to_string()} - {activity.time_slot_end.to_string()}: {activity.event}")
+        for a in activities:
+            print(f"  {a.time_slot_start.to_string()}-{a.time_slot_end.to_string()}: {a.event}")
 
-    # Book a room using specific room enum and time
-    from dsv_wrapper.models import BookingSlot
-    slot = BookingSlot(
-        room=Room.G10_1,
-        from_time=RoomTime.NINE,
-        to_time=RoomTime.TEN
-    )
+    # Room booking
+    slot = BookingSlot(room=Room.G10_1, from_time=RoomTime.NINE, to_time=RoomTime.TEN)
 
-    # Search for students
-    students = daisy.search_students("john", limit=10)
-    for student in students:
-        first_name = student.first_name or ""
-        last_name = student.last_name or ""
-        print(f"Student: {first_name} {last_name} ({student.username})")
+    # Search for students by full first+last name (returns 0-N hits)
+    hits = daisy.search_students(first_name="Edwin", last_name="Sundberg")
+    for s in hits:
+        print(f"Student {s.full_name} (personID={s.person_id})")
+        # Username isn't on the search row — resolve on demand:
+        print(f"  username: {s.get_username(daisy)}")
+
+    # Staff search and full profile (with usernames, office hours, …)
+    staff_list = daisy.search_staff(last_name="Åkerblom")
+    staff = daisy.get_staff_details(staff_list[0].person_id)
+    print(staff.usernames, staff.office_hours, staff.website)
+
+
+# --- Department-wide course/medverkande iteration ----------------------------
+# Iterate every course offering for a semester, list everyone involved with
+# their roles, and resolve missing personIDs/usernames lazily.
+
+with DaisyClient() as daisy:
+    vt2026 = Semester.from_label("VT2026")     # also: Semester.from_termin_id("20261")
+    for course in daisy.get_courses(vt2026):    # auto-paginated
+        print(f"\n{course.beteckning} — {course.name}  ({course.ects} hp)")
+        print(f"  {course.start_date} → {course.end_date}")
+        print(f"  syllabus: {course.syllabus_url or '-'}")
+
+        for cs in daisy.get_course_participants(course.momenttillf_id):
+            # cs.roles is a list, e.g. ['Kurs-/delkursansvarig', 'Examination']
+            # cs.person_id is None for plain-text names (typically student-handledare)
+            try:
+                pid = cs.get_person_id(daisy)
+            except AmbiguousMatchError as e:
+                print(f"    ! {cs.name} unresolved: {e}")
+                continue
+
+            if cs.profile_url and "studentinfo" in cs.profile_url:
+                details = daisy.get_student_details(pid)
+                username = details.username
+            else:
+                details = daisy.get_staff_details(pid)
+                username = details.usernames[0] if details.usernames else None
+
+            print(f"  {cs.name:30s} {cs.roles}  → {username}")
 ```
+
+`Semester` encodes Daisy's 5-digit `terminID` (`YYYY1`=VT, `YYYY2`=HT) and accepts `from_label("VT2026")` / `from_termin_id(20261)`. Course offerings ("moment") expose `beteckning`, `name`, `ects`, `start_date`/`end_date`, `info_url`, `schedule_url`, `participants_url`, and (after `get_course`) `syllabus_url` + `unit`.
+
+`CourseStaff.get_person_id(client)` is cached: it returns the parsed `person_id` from the page immediately, falls back to a Daisy student search by full first+last name (with a second attempt using `first_token / remaining_tokens` for multi-word surnames like *Fathi Tachinabadi*), and raises `AmbiguousMatchError` on 0 or >1 hits. `Student.get_username(client)` and `Staff.get_usernames(client)` follow the same lazy-cache-or-throw pattern.
 
 #### Handledning Client
 
@@ -302,6 +335,8 @@ from dsv_wrapper.models import (
     Room, RoomCategory, RoomTime, RoomRestriction,
     BookingSlot, RoomActivity, BookableRoom, Schedule, Break,
     Student, Teacher, Course, Staff, ActivityType,
+    # Daisy course / medverkande
+    Semester, TermSeason, DaisyCourse, CourseStaff, CourseResponsibility,
     # Handledning models
     QueueEntry, QueueStatus, HandledningSession,
     # Clickmap models
@@ -354,6 +389,7 @@ from dsv_wrapper import (
     RoomNotAvailableError,
     HandledningError,
     QueueError,
+    AmbiguousMatchError,  # raised by CourseStaff.get_person_id / Student.get_username
 )
 
 try:

@@ -1,7 +1,8 @@
 """Pydantic models for Daisy system."""
 
+import re
 from collections.abc import Callable
-from datetime import datetime
+from datetime import date, datetime
 from enum import Enum
 
 from pydantic import BaseModel, Field
@@ -406,8 +407,243 @@ class ActivityType(str, Enum):
     OTHER = "Övrigt"
 
 
+class TermSeason(str, Enum):
+    """Daisy term seasons. VT = vårtermin (spring), HT = hösttermin (autumn)."""
+
+    VT = "VT"
+    HT = "HT"
+
+
+class Semester(BaseModel):
+    """A Daisy semester (e.g. VT2026, HT2025).
+
+    Daisy encodes semesters as 5-digit IDs: ``YYYY`` followed by ``1`` (VT) or ``2`` (HT).
+    VT2026 → ``20261``, HT2026 → ``20262``.
+    """
+
+    year: int
+    season: TermSeason
+
+    model_config = {"frozen": True}
+
+    @property
+    def termin_id(self) -> str:
+        """Daisy termID (e.g. '20261' for VT2026)."""
+        suffix = "1" if self.season is TermSeason.VT else "2"
+        return f"{self.year}{suffix}"
+
+    @property
+    def label(self) -> str:
+        """Human label like 'VT2026'."""
+        return f"{self.season.value}{self.year}"
+
+    def __str__(self) -> str:
+        return self.label
+
+    @classmethod
+    def from_label(cls, label: str) -> "Semester":
+        """Parse 'VT2026' / 'HT2025' (case-insensitive)."""
+        label = label.strip().upper()
+        if len(label) < 3 or label[:2] not in {"VT", "HT"}:
+            raise ValueError(f"Invalid semester label: {label!r}")
+        try:
+            year = int(label[2:])
+        except ValueError as e:
+            raise ValueError(f"Invalid year in semester label: {label!r}") from e
+        return cls(year=year, season=TermSeason(label[:2]))
+
+    @classmethod
+    def from_termin_id(cls, termin_id: str | int) -> "Semester":
+        """Parse a Daisy termID like '20261' or 20261."""
+        s = str(termin_id)
+        if len(s) != 5 or s[-1] not in {"1", "2"}:
+            raise ValueError(f"Invalid termin_id: {termin_id!r}")
+        year = int(s[:4])
+        season = TermSeason.VT if s[-1] == "1" else TermSeason.HT
+        return cls(year=year, season=season)
+
+
+class DaisyCourse(BaseModel):
+    """A course offering ("moment"/"delkurs" instance) in Daisy.
+
+    Represents a specific delivery of a course in a particular semester.
+    Fields with ``None`` typically mean the data was not present on the page
+    used to construct the model — call :meth:`DaisyClient.get_course` to
+    fetch the full detail page.
+    """
+
+    momenttillf_id: str = Field(description="Daisy momenttillfID (e.g. '7620')")
+    beteckning: str = Field(description="Course code/designation (e.g. 'PROG2')")
+    name: str = Field(description="Course name in Swedish")
+    ects: float | None = Field(default=None, description="Credits (högskolepoäng)")
+    semester: Semester | None = None
+    start_date: date | None = None
+    end_date: date | None = None
+    info_url: str | None = Field(default=None, description="Public momentinfo URL")
+    schedule_url: str | None = Field(default=None, description="Schedule URL")
+    participants_url: str | None = Field(default=None, description="Deltagarlista URL")
+    syllabus_url: str | None = Field(
+        default=None,
+        description="External syllabus URL (utbildning.su.se planarkiv) — only from detail page",
+    )
+    unit: str | None = Field(default=None, description="Owning unit, e.g. 'ACT' — only from detail")
+
+    model_config = {"frozen": True}
+
+
+class CourseStaff(BaseModel):
+    """A person involved in teaching/administering a course offering.
+
+    Sourced from the public ``/servlet/momentinfo.Momentinfo`` page, which
+    groups people under free-text role headings (e.g. *Kurs-/delkursansvarig*,
+    *Examination*, *Handledare*, *Laborationsledare*, *Administration*).
+    A single person can appear under multiple headings; we merge them into
+    :attr:`roles` so each person shows up once with all their roles.
+
+    Some participants (typically student-handledare) appear on the public page
+    as plain text, without a profile link. For those we capture name + roles
+    but :attr:`person_id` is ``None``. Call :meth:`get_person_id` to resolve
+    them via Daisy's student search.
+
+    Daisy links employed staff to ``/anstalld/anstalldinfo.jspa`` and student
+    tutors to ``/anstalld/student/studentinfo.jspa`` (and some employed people
+    keep a legacy student-URL link — e.g. former PhDs). The URL alone is not
+    a reliable indicator of current employment, so we don't model it as a
+    boolean; :meth:`get_details` returns either a :class:`Staff` or a
+    :class:`StudentInfo` based on the URL flavour, and you can pattern-match
+    on the result.
+    """
+
+    name: str = Field(description="Full display name as shown on the course page")
+    first_name: str | None = Field(
+        default=None, description="First-name component, parsed from 'name'"
+    )
+    last_name: str | None = Field(
+        default=None, description="Last-name component, parsed from 'name'"
+    )
+    person_id: str | None = Field(
+        default=None,
+        description=(
+            "Daisy personID. ``None`` for participants listed as plain text "
+            "without a profile link — call :meth:`get_person_id` to resolve."
+        ),
+    )
+    profile_url: str | None = None
+    roles: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Role headings this person appears under on the course page. "
+            "Free-text Swedish strings — common ones: 'Kurs-/delkursansvarig', "
+            "'Examination', 'Handledare', 'Laborationsledare', 'Administration'."
+        ),
+    )
+
+    # Mutable so :meth:`get_person_id` can cache its result.
+    model_config = {"frozen": False}
+
+    def _name_split_attempts(self) -> list[tuple[str, str]]:
+        """Yield (first_name, last_name) candidate splits to try in order.
+
+        Daisy stores the boundary inconsistently for multi-word names. The
+        default split (everything-but-last vs last token) handles hyphenated
+        first names like ``Andrés-Emilio Miranda``. The fallback (first token
+        vs the rest) catches multi-word surnames like ``Fathi Tachinabadi``.
+        """
+        if not self.first_name or not self.last_name:
+            return []
+        attempts: list[tuple[str, str]] = [(self.first_name, self.last_name)]
+        # Build the alt split from the original full name, not from the
+        # already-split fields — handles cases like "Mats Karlsson Landré".
+        tokens = [t for t in re.split(r"\s+", self.name.strip()) if t]
+        if len(tokens) >= 3:
+            alt = (tokens[0], " ".join(tokens[1:]))
+            if alt != attempts[0]:
+                attempts.append(alt)
+        return attempts
+
+    def get_person_id(self, client: "DaisyClient") -> str:  # type: ignore[name-defined]  # noqa: F821
+        """Return Daisy ``personID``, resolving via student search if needed.
+
+        - If :attr:`person_id` is already set (from the page link), returns it.
+        - Otherwise POSTs ``firstname`` + ``lastname`` to the student search;
+          if that returns 0 hits and the name has ≥3 tokens, retries once
+          with the alternate split (first token / remainder).
+        - Requires exactly one hit, caches the resolved id on this instance.
+
+        Raises:
+            AmbiguousMatchError: If both attempts return 0 or >1 hits, or if
+                this instance has no parsed first/last name.
+        """
+        if self.person_id is not None:
+            return self.person_id
+        from ..exceptions import AmbiguousMatchError
+
+        attempts = self._name_split_attempts()
+        if not attempts:
+            raise AmbiguousMatchError(
+                f"Cannot resolve {self.name!r}: missing first/last name split"
+            )
+        last_count = None
+        for first, last in attempts:
+            hits = client.search_students(first_name=first, last_name=last)
+            if len(hits) == 1 and hits[0].person_id:
+                object.__setattr__(self, "person_id", hits[0].person_id)
+                if hits[0].profile_url and self.profile_url is None:
+                    object.__setattr__(self, "profile_url", hits[0].profile_url)
+                return hits[0].person_id
+            last_count = len(hits)
+        raise AmbiguousMatchError(
+            f"Student search for {self.name!r} returned {last_count} matches "
+            f"(expected exactly 1) after trying {len(attempts)} name splits"
+        )
+
+    async def aget_person_id(
+        self,
+        client: "AsyncDaisyClient",  # type: ignore[name-defined]  # noqa: F821
+    ) -> str:
+        """Async sibling of :meth:`get_person_id`."""
+        if self.person_id is not None:
+            return self.person_id
+        from ..exceptions import AmbiguousMatchError
+
+        attempts = self._name_split_attempts()
+        if not attempts:
+            raise AmbiguousMatchError(
+                f"Cannot resolve {self.name!r}: missing first/last name split"
+            )
+        last_count = None
+        for first, last in attempts:
+            hits = await client.search_students(first_name=first, last_name=last)
+            if len(hits) == 1 and hits[0].person_id:
+                object.__setattr__(self, "person_id", hits[0].person_id)
+                if hits[0].profile_url and self.profile_url is None:
+                    object.__setattr__(self, "profile_url", hits[0].profile_url)
+                return hits[0].person_id
+            last_count = len(hits)
+        raise AmbiguousMatchError(
+            f"Student search for {self.name!r} returned {last_count} matches "
+            f"(expected exactly 1) after trying {len(attempts)} name splits"
+        )
+
+
+class CourseResponsibility(BaseModel):
+    """A staff member's course-responsibility entry as listed on their profile."""
+
+    semester: Semester
+    beteckningar: list[str] = Field(default_factory=list)
+
+    model_config = {"frozen": True}
+
+
 class Staff(BaseModel):
-    """Staff/employee model for Daisy."""
+    """Staff/employee model for Daisy.
+
+    The basic identification fields come from search results; the richer
+    fields (address, usernames, office_hours, …) come from the individual
+    profile page returned by :meth:`DaisyClient.get_staff_details`. Call
+    :meth:`get_usernames` to fetch them lazily when starting from a search
+    result.
+    """
 
     person_id: str
     name: str
@@ -420,5 +656,66 @@ class Staff(BaseModel):
     swedish_title: str | None = None
     english_title: str | None = None
     phone: str | None = None
+    usernames: list[str] = Field(
+        default_factory=list, description="One or more login names (KTH/SU/DSV realm-prefixed)"
+    )
+    address: str | None = None
+    home_phone: str | None = None
+    alt_phone: str | None = None
+    office_hours: str | None = Field(default=None, description="Mottagningstid free-text")
+    exam_systems: list[str] = Field(
+        default_factory=list,
+        description="Examination systems the staff member is trained for (e.g. 'iExam')",
+    )
+    research_areas: list[str] = Field(default_factory=list)
+    website: str | None = None
+    course_responsibilities: list[CourseResponsibility] = Field(default_factory=list)
 
-    model_config = {"frozen": True}
+    # Mutable so :meth:`get_usernames` can cache its result.
+    model_config = {"frozen": False}
+
+    def get_usernames(self, client: "DaisyClient") -> list[str]:  # type: ignore[name-defined]  # noqa: F821
+        """Return staff logins, fetching the profile page if needed.
+
+        - If :attr:`usernames` already has entries, returns them.
+        - Otherwise fetches ``/anstalld/anstalldinfo.jspa?personID=N``,
+          replaces this instance's fields with the full profile, and
+          returns the resolved usernames.
+
+        Raises:
+            AmbiguousMatchError: If the profile page surfaces no usernames
+                (occasionally true for accounts pending provisioning).
+        """
+        if self.usernames:
+            return self.usernames
+        from ..exceptions import AmbiguousMatchError
+
+        full = client.get_staff_details(self.person_id)
+        if not full.usernames:
+            raise AmbiguousMatchError(f"Staff profile {self.person_id} has no usernames")
+        # Backfill every field this instance has left blank.
+        for field in full.model_fields:
+            current = getattr(self, field)
+            new = getattr(full, field)
+            if current in (None, "", [], ()):
+                object.__setattr__(self, field, new)
+        return full.usernames
+
+    async def aget_usernames(
+        self,
+        client: "AsyncDaisyClient",  # type: ignore[name-defined]  # noqa: F821
+    ) -> list[str]:
+        """Async sibling of :meth:`get_usernames`."""
+        if self.usernames:
+            return self.usernames
+        from ..exceptions import AmbiguousMatchError
+
+        full = await client.get_staff_details(self.person_id)
+        if not full.usernames:
+            raise AmbiguousMatchError(f"Staff profile {self.person_id} has no usernames")
+        for field in full.model_fields:
+            current = getattr(self, field)
+            new = getattr(full, field)
+            if current in (None, "", [], ()):
+                object.__setattr__(self, field, new)
+        return full.usernames

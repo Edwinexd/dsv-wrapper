@@ -101,3 +101,14 @@ class ACTLabError(DSVWrapperError):
     """Raised when ACT Lab operations fail."""
 
     pass
+
+
+class AmbiguousMatchError(DSVWrapperError):
+    """Raised when a lookup expected a unique result but got 0 or >1 matches.
+
+    Used by :meth:`dsv_wrapper.models.daisy.CourseStaff.get_person_id` when
+    resolving a plain-text participant name through the student search:
+    Daisy must return exactly one person for the resolution to be safe.
+    """
+
+    pass

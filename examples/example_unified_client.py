@@ -25,9 +25,9 @@ with DSVClient(username=USERNAME, password=PASSWORD) as client:
     total_activities = sum(len(activities) for activities in schedule.activities.values())
     print(f"Total activities: {total_activities}")
 
-    # Search students
-    students = daisy.search_students("anna", limit=5)
-    print(f"Found {len(students)} students matching 'anna'")
+    # Search students by full first+last name
+    students = daisy.search_students(first_name="Edwin", last_name="Sundberg")
+    print(f"Found {len(students)} students matching 'Edwin Sundberg'")
 
     # Access Handledning through the unified client
     print("\n2. Using Handledning client...")

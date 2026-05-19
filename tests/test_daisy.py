@@ -12,21 +12,24 @@ logger = logging.getLogger(__name__)
 
 @pytest.mark.integration
 def test_daisy_search_students(daisy_client):
-    """Test searching for students."""
-    # Search for common Swedish names
-    students = daisy_client.search_students("erik", limit=5)
+    """Search students by full first+last name and verify result shape.
 
-    assert students is not None
+    Uses the test runner's own name (Edwin Sundberg) — Daisy keeps a legacy
+    student record for him alongside his employment record, so the search
+    returns exactly one hit.
+    """
+    students = daisy_client.search_students(first_name="Edwin", last_name="Sundberg")
+
     assert isinstance(students, list)
-
-    if students:
-        logger.info(f"Found {len(students)} students matching 'erik'")
-
-        student = students[0]
-        assert student.username
-        logger.info(f"First student: {student.full_name} ({student.username})")
-    else:
-        logger.warning("No students found in search")
+    assert len(students) == 1, f"expected exactly one hit, got {len(students)}"
+    student = students[0]
+    assert student.person_id and student.person_id.isdigit()
+    assert student.profile_url and "studentinfo.jspa" in student.profile_url
+    assert student.first_name == "Edwin"
+    assert student.last_name == "Sundberg"
+    # Search results never carry the SU username — that lives on the profile.
+    assert student.username is None
+    logger.info(f"Resolved {student.full_name} -> personID={student.person_id}")
 
 
 @pytest.mark.integration

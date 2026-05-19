@@ -26,6 +26,9 @@ from .daisy import (
     BookableRoom,
     BookingSlot,
     Break,
+    CourseResponsibility,
+    CourseStaff,
+    DaisyCourse,
     InstitutionID,
     Room,
     RoomActivity,
@@ -33,7 +36,9 @@ from .daisy import (
     RoomRestriction,
     RoomTime,
     Schedule,
+    Semester,
     Staff,
+    TermSeason,
 )
 
 # Handledning models
@@ -70,6 +75,11 @@ __all__ = [
     "Break",
     "ActivityType",
     "Staff",
+    "Semester",
+    "TermSeason",
+    "DaisyCourse",
+    "CourseStaff",
+    "CourseResponsibility",
     # Handledning models
     "QueueStatus",
     "QueueEntry",

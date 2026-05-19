@@ -28,13 +28,13 @@ async def main():
             available = [slot for slot in room.available_times if slot.available]
             print(f"  {room.name}: {len(available)} available slots")
 
-        # Search students
-        print("\n3. Searching for students...")
-        students = await daisy.search_students("maria", limit=5)
+        # Search students by full first+last name
+        print("\n3. Searching for a student...")
+        students = await daisy.search_students(first_name="Edwin", last_name="Sundberg")
         print(f"Found {len(students)} students:")
 
         for student in students:
-            print(f"  - {student.full_name} ({student.username})")
+            print(f"  - {student.full_name} (personID={student.person_id})")
 
         # Get Handledning client
         print("\n4. Getting async Handledning client...")
@@ -53,8 +53,8 @@ async def main():
 
         # Run multiple operations concurrently
         results = await asyncio.gather(
-            daisy.search_students("john", limit=3),
-            daisy.search_students("anna", limit=3),
+            daisy.search_students(first_name="Edwin", last_name="Sundberg"),
+            daisy.search_students(last_name="Åkerblom"),
             handledning.get_all_active_sessions(),
             return_exceptions=True,
         )

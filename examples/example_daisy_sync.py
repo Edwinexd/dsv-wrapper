@@ -2,7 +2,7 @@
 
 from datetime import date
 
-from dsv_wrapper import DaisyClient, RoomCategory
+from dsv_wrapper import AmbiguousMatchError, DaisyClient, RoomCategory, Semester
 
 # Initialize the Daisy client
 USERNAME = "your_username"
@@ -30,19 +30,42 @@ with DaisyClient(username=USERNAME, password=PASSWORD, service="daisy_staff") as
         else:
             print("    No activities")
 
-    # Search for students
-    print("\n2. Searching for students...")
-    students = daisy.search_students("john", limit=5)
+    # Search students by full first+last name
+    print("\n2. Searching for a student...")
+    students = daisy.search_students(first_name="Edwin", last_name="Sundberg")
     print(f"Found {len(students)} students:")
-
     for student in students:
-        first_name = student.first_name or ""
-        last_name = student.last_name or ""
-        full_name = f"{first_name} {last_name}".strip()
-        print(f"  - {full_name} ({student.username})")
+        print(f"  - {student.full_name} (personID={student.person_id})")
+        # Username isn't on search rows — resolve from the profile lazily.
+        try:
+            print(f"    SU username: {student.get_username(daisy)}")
+        except AmbiguousMatchError as e:
+            print(f"    no username available: {e}")
         if student.email:
             print(f"    Email: {student.email}")
-        if student.program:
-            print(f"    Program: {student.program}")
+
+    # Course iteration for an entire semester
+    print("\n3. Listing courses for VT2026 and one course's medverkande...")
+    vt2026 = Semester.from_label("VT2026")
+    courses = daisy.get_courses(vt2026)
+    print(f"  {len(courses)} courses for {vt2026}")
+    for course in courses[:3]:
+        print(
+            f"    {course.beteckning:14s} {course.name[:45]:45s} "
+            f"{course.ects} hp  {course.start_date} → {course.end_date}"
+        )
+
+    # Drill into the first course's role-grouped participants
+    first = courses[0]
+    print(f"\n  Medverkande on {first.beteckning} {first.name}:")
+    for cs in daisy.get_course_participants(first.momenttillf_id):
+        roles = ", ".join(cs.roles)
+        # person_id is None for plain-text names (typically student-handledare).
+        try:
+            pid = cs.get_person_id(daisy)
+        except AmbiguousMatchError as e:
+            print(f"    ! {cs.name} ({roles}) — unresolved: {e}")
+            continue
+        print(f"    {cs.name:30s} [{roles}]  personID={pid}")
 
     print("\n=== Done ===")

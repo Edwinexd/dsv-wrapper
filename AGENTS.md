@@ -1,6 +1,6 @@
 ## Project Status
 
-- **67 of 67 pytest tests passing** - 100% pass rate!
+- **99 of 99 pytest tests passing** - 100% pass rate!
 - **Major architecture refactor COMPLETE**: Fully migrated from requests/aiohttp to httpx
 - **Strict error handling implemented**: Silent failures replaced with explicit ParseError exceptions
 - All clients (ACTLab, Daisy, Handledning, Clickmap, Play) now use unified httpx architecture
@@ -12,6 +12,7 @@
 - **NEW: Clickmap client added** - Extract DSV office/workspace placements
 - **NEW: Mail client added** - Send and read emails via SU webmail (mail.su.se)
 - **NEW: Play client added** - Access DSVPlay presentations, transcripts, and courses
+- **NEW: Daisy course/medverkande API** - Iterate course offerings per semester, fetch details, list participants
 
 ## Architecture Changes (2025-11-24)
 
@@ -172,6 +173,114 @@
     specifically still catch `TranscriptNotReadyError`.
 - All play tests passing (12 unit + 8 integration)
 
+### Daisy Course / Medverkande API (New - 2026-05-19)
+- **Iterate course offerings ("moment") in Daisy** with rich models for course
+  metadata, participants, and staff responsibilities.
+- **New models** (in `dsv_wrapper/models/daisy.py`):
+  - `Semester`: combines `year` + `TermSeason` (VT/HT). Helpers:
+    `Semester.from_label("VT2026")`, `Semester.from_termin_id("20261")`,
+    `.termin_id` (`"20261"`), `.label` (`"VT2026"`). Daisy encodes terms as
+    `YYYY1` for VT and `YYYY2` for HT.
+  - `DaisyCourse`: a course offering (`momenttillf_id`, `beteckning`, `name`,
+    `ects`, `semester`, `start_date`, `end_date`, `info_url`, `schedule_url`,
+    `participants_url`, `syllabus_url`, `unit`). Search results omit
+    `syllabus_url`/`unit`; the detail page omits start/end dates.
+  - `CourseStaff`: a person involved on a course (`name`, `first_name`,
+    `last_name`, `person_id`, `profile_url`, `roles: list[str]`). Sourced
+    from the public momentinfo page's *Medverkande* section, which groups
+    people under free-text role headings (*Kurs-/delkursansvarig*,
+    *Examination*, *Handledare*, *Laborationsledare*, *Administration*,
+    *Föreläsare*, *Gästföreläsare*, *Utveckling*, *Lektionsledare*, …).
+    A person appearing under multiple groups is merged into a single
+    `CourseStaff` with all their roles. Profile URLs may point at
+    `/anstalld/anstalldinfo.jspa` OR `/anstalld/student/studentinfo.jspa`
+    (e.g. former PhDs linked to their student record); the distinction is
+    NOT a reliable indicator of current employment status, so we don't
+    model it. **`person_id` is `None` for participants listed as plain
+    text** without a profile link (typically student-handledare) – call
+    `CourseStaff.get_person_id(client)` to resolve them. That method does
+    a Daisy student search by full first+last name (with a fallback to
+    `first_token / remaining_tokens` for multi-word surnames like
+    "Fathi Tachinabadi") and raises :class:`AmbiguousMatchError` on 0 or
+    >1 hits. The resolved id is cached on the instance.
+  - `CourseResponsibility`: `(semester, beteckningar)` pair listed on a staff
+    member's profile. Only the currently-displayed semester is captured per
+    profile fetch (Daisy paginates these with arrow links).
+  - Extended `Staff` fields: `usernames` (list — KTH/SU/DSV realms),
+    `address` (newline-preserved), `home_phone`, `alt_phone`, `office_hours`
+    (mottagningstid), `exam_systems`, `research_areas`, `website`,
+    `course_responsibilities`.
+- **Lazy ID/username resolution** on the models:
+  - `CourseStaff.get_person_id(client)` / `.aget_person_id(client)` —
+    returns cached `person_id` if set, else searches Daisy students by
+    full name, throws :class:`AmbiguousMatchError` on 0/>1 hits.
+  - `Student.get_username(client)` / `.aget_username(client)` — returns
+    cached `username` if set, else fetches the student profile (using
+    `person_id`), throws if none surfaced.
+  - `Staff.get_usernames(client)` / `.aget_usernames(client)` — same
+    pattern for staff profiles. Backfills every other empty field on
+    the instance from the profile fetch.
+  - All three caches mutate the instance in place (models are no longer
+    frozen for this reason).
+- **New client methods** on both `DaisyClient` and `AsyncDaisyClient`:
+  - `get_courses(semester=None, *, semester_from=None, semester_to=None,
+    beteckning="", name="", institution_id=DSV, max_pages=None)`: lists
+    `DaisyCourse`s by auto-paginating
+    `POST /sok/sokmoment.jspa` (20 per page, `querypage=N` 0-indexed). Pass
+    `semester` for a single term, or `semester_from`/`semester_to` for a range.
+  - `get_course(momenttillf_id)`: fetches `/servlet/momentinfo.Momentinfo?id=…`
+    and parses out `ects`, `unit`, `semester`, and the external SU syllabus URL.
+  - `get_course_participants(momenttillf_id)`: parses the public momentinfo
+    page's *Medverkande* section and returns `CourseStaff`s. Works for any
+    course in Daisy, not just ones you teach (unlike the auth-gated
+    `akt=mdv` tab). Same URL as `get_course` – call both if you need
+    metadata + participants, or use the parsers directly to avoid the
+    second request. Captures both linked (`<a personID=N>…</a>`) and
+    unlinked plain-text names; the latter come back with
+    `person_id=None` and are resolved on demand via
+    `CourseStaff.get_person_id`.
+  - `search_students(last_name="", first_name="", email="", username="",
+    institution_id="", page_size=25)`: POSTs to `/sok/visastudent.jspa`
+    and parses the result table. Returns `Student` rows with `person_id`
+    + `profile_url` populated but `username=None` – call
+    `Student.get_username(client)` to resolve.
+  - `get_student_details(person_id)`: fetches
+    `/anstalld/student/studentinfo.jspa?personID=…` and returns a
+    fully-populated `Student` (username, email, phone, program, address).
+- **Parsing** (`dsv_wrapper/parsers/daisy.py`):
+  - `parse_course_search` returns `(courses, range_from, range_to, total)` so
+    callers can drive pagination if they want manual control.
+  - `parse_course_detail` extracts beteckning/term from the page `<title>` and
+    ECTS / unit from the "Namn / Enhet / Poäng" line.
+  - `parse_course_participants` walks the role-grouped
+    `<div class="brodtext">` blocks in the *Medverkande* row of the
+    momentinfo page; each block starts with `<b>RoleName</b>` and contains
+    `<a personID=N>…</a>Name` entries plus plain-text names without `<a>`
+    wrappers. Same person across multiple role groups gets merged into
+    one `CourseStaff`. The auth-gated `akt=mdv` tab is NOT used – it
+    returns "Du är inte behörig" for courses the authenticated user
+    doesn't teach. The `deltagarlista.jspa` endpoint is the enrolled-
+    student roster (NOT the teaching team); student-handledare are not
+    enrolled in their own course, so we can't use it for resolution.
+  - `parse_staff_details` was extended to capture all the rich profile fields
+    listed above without changing its signature.
+- **Daisy URL conventions captured**:
+  - `/sok/sokmoment.jspa` (POST) — course search; fields: `institution=4` for
+    DSV, `fromTerminID`/`tomTerminID` (5-digit `YYYY[12]`), `beteckning`,
+    `namn`, optional `querypage` for pagination.
+  - `/servlet/momentinfo.Momentinfo?id=N` — public detail page.
+  - `/servlet/schema.moment.Momentschema?id=N` — schedule.
+  - `/anstalld/moment/deltagarlista.jspa?momenttillfID=N` — student list.
+  - `/anstalld/moment/momentNav.jspa?momenttillfID=N&akt={inf|mdv|sch|exa|grp|utv|upp|med}`
+    — internal staff nav (`mdv` = medverkande, `med` = meddelanden). The
+    `mdv` tab carries email/phone/room columns but is restricted to the
+    course's own teaching team; the public momentinfo page is preferred.
+- **Tests**: 12 unit tests against captured HTML fixtures
+  (`tests/fixtures/daisy/`) covering Semester roundtrips, course search
+  pagination header, course detail title parsing, role-grouped participant
+  merging (DB has 8 people across 9 role groups), and staff profile rich
+  fields. Plus 3 live-integration tests for the new client methods.
+
 ### Strict Error Handling (Complete)
 - **Replaced silent failures with explicit ParseError exceptions**
 - Parsing functions now raise ParseError instead of silently continuing on errors:
@@ -203,6 +312,7 @@
 - ✅ **Clickmap client added** (new service - 2025-11-25)
 - ✅ **Mail client refactored to IMAP/SMTP** (2025-11-26) - Replaced fragile OWA API with standard protocols
 - ✅ **Play client added** (new service - 2026-03-31) - DSVPlay presentations, transcripts, courses
+- ✅ **Daisy course/medverkande API** (2026-05-19) - `get_courses(semester)`, `get_course`, `get_course_participants`, extended `Staff` fields
 - ✅ BaseAsyncClient removed
 - ✅ Old unified client files removed (base_unified.py, shibboleth_unified.py, actlab_unified.py)
 - ✅ requirements.txt updated (removed requests and aiohttp dependencies)
@@ -233,7 +343,7 @@
 
 ## Testing Notes
 
-- **Test coverage: 67/67 passing - 100%!**
+- **Test coverage: 99/99 passing - 100%!**
 - All authentication tests pass including invalid credentials detection
 - API parity tests verify sync/async clients have identical method signatures
 - All ACTLab, Daisy, Handledning, Clickmap, Mail, and Play tests pass
@@ -244,3 +354,4 @@
 - Mail tests now use IMAP/SMTP instead of OWA API
 - Mail send tests use `AUTOMATEDTESTSEND - {timestamp}` pattern for easy cleanup
 - Play tests include: courses, presentations listing, full presentation details, transcript, API parity
+- Daisy course tests use captured HTML fixtures in `tests/fixtures/daisy/` and exercise `Semester`, course-search pagination header, course detail title parsing, medverkande K-marker, and rich-staff parsing

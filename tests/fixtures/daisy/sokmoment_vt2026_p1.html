@@ -1,0 +1,1552 @@
+
+
+
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" id="arbetsbord" lang="sv">
+
+
+<head>
+
+    <script src="/static/utils.js">
+</script>
+
+    <title>Daisy &raquo; Sök &raquo; Kurser/Delkurser</title>
+    <link rel="icon" href="/favicon.ico"/>
+
+
+
+
+
+
+<script type="text/javascript" src="/static/js/base/jquery-3.7.1.min.js">
+</script>
+        <!-- script type="text/javascript" src="/static/js/base/core.min.js?s2j=5.0.7"></script -->
+<script type="text/javascript" src="/static/js/base/version.min.js">
+</script>
+<script type="text/javascript" src="/static/js/plugins/jquery.subscribe.min.js?s2j=5.0.7">
+</script>
+
+<script type="text/javascript" src="/static/js/struts2/jquery.struts2.min.js?s2j=5.0.7">
+</script>
+
+<script type="text/javascript">
+    $(function () {
+        jQuery.struts2_jquery.version = "5.0.7";
+        jQuery.scriptPath = "/static/";
+        jQuery.struts2_jquery.local = "sv";
+        jQuery.struts2_jquery.gridLocal = "sv";
+        jQuery.struts2_jquery.timeLocal = "sv";
+        jQuery.struts2_jquery.datatablesLocal = "sv";
+        jQuery.ajaxSettings.traditional = true;
+
+        jQuery.ajaxSetup({
+            cache: false
+        });
+
+        jQuery.struts2_jquery.require("js/struts2/jquery.ui.struts2.min.js?s2j=5.0.7");
+
+    });
+</script>
+
+<link rel="stylesheet" type="text/css" href="/static/themes/smoothness/jquery-ui.css?s2j=5.0.7"/>
+
+
+
+    <script type="text/javascript" src="/script/daisydojo.js?v=20260511195807"></script>
+    <script type="text/javascript" src="/script/daisy.js?v=20260511195807"></script>
+    <link rel="stylesheet" media="screen,projection,print" href="/css/nymeny.css?v=20260511195807"/>
+    <link rel="stylesheet" media="screen,projection,print" href="/css/main.css?v=20260511195807"/>
+    <link rel="stylesheet" media="screen,projection,print" href="/css/form.css?v=20260511195807"/>
+    <link rel="stylesheet" media="screen,projection,print" href="/css/autosuggest_inquisitor.css?v=20260511195807"/>
+    <link rel="stylesheet" media="screen,projection,print" href="/css/anstalld.css?v=20260511195807"/>
+    <link rel="stylesheet" media="screen,projection,print" href="/css/stylesdefault.css?v=20260511195807"/>
+    <link rel="stylesheet" media="print" href="/css/print.css?v=20260511195807"/>
+
+
+
+</head>
+<body id="anstalldbody">
+<div id="toppen">
+    <div id="huvud">
+        <div id="snabbsok">
+            <form action="" onsubmit="snabbsok(this, false); return false;">
+                Sök: <input type="text" name="searchString" value="" id="searchString" class="falt17"/>
+                <select class="standardfalt" name="typ">
+                    <option  value="student">
+                        Studenter
+                    </option>
+                    <option  value="anstalld">
+                        Anställda
+                    </option>
+                    <option selected="true" value="moment">
+                        Kurser/Delkurser
+                    </option>
+                    <option  value="uppsats">
+                        Examensarbeten
+                    </option>
+                    <option  value="publikation">
+                        Publikationer
+                    </option>
+                </select>
+                <button type="submit">Sök</button>
+            </form>
+        </div>
+    </div>
+
+
+    <div id="meny"><h5>Avancerad sökning</h5></div>
+    <div id="submeny">
+        <table cellspacing="0" id="submeny1">
+            <tr>
+                <td><a href="/sok/visastudent.jspa">Studenter</a></td>
+                <td><a href="/sok/visaanstalld.jspa">Anställda</a></td>
+                <td><a href="/sok/visamoment.jspa">Kurser/Delkurser</a></td>
+                <td><a href="/sok/visauppsats.jspa">Examensarbeten</a></td>
+                <td><a href="/sok/visapublikation.jspa">Publikationer</a></td>
+            </tr>
+        </table>
+    </div>
+</div>
+<div id="body">
+
+<h1>Sök kurs/delkurs</h1>
+<br/>
+<form id="sokmomform" name="sokmomform" action="/sok/sokmoment.jspa" method="post">
+
+    <div id="wwgrp_sokmomform_beteckning" class="wwgrp">
+<div id="wwlbl_sokmomform_beteckning" class="wwlbl">
+<label for="sokmomform_beteckning" class="label">        Beteckning:
+</label></div> <br /><div id="wwctrl_sokmomform_beteckning" class="wwctrl">
+<input type="text" name="beteckning" value="" id="sokmomform_beteckning" style="margin-bottom: 5px;"/></div> </div>
+
+
+    <div id="wwgrp_sokmomform_namn" class="wwgrp">
+<div id="wwlbl_sokmomform_namn" class="wwlbl">
+<label for="sokmomform_namn" class="label">        Namn:
+</label></div> <br /><div id="wwctrl_sokmomform_namn" class="wwctrl">
+<input type="text" name="namn" value="" id="sokmomform_namn" style="margin-bottom: 5px;"/></div> </div>
+
+
+    <div id="wwgrp_sokmomform_kursID" class="wwgrp">
+<div id="wwlbl_sokmomform_kursID" class="wwlbl">
+<label for="sokmomform_kursID" class="label">        Kurs:
+</label></div> <br /><div id="wwctrl_sokmomform_kursID" class="wwctrl">
+<select name="kursID" id="sokmomform_kursID" style="margin-bottom: 5px;">
+    <option value=""></option>
+    <option value="248">2B1110 (KTH) - Introduktion till mikroelektronik, 6.00 hp</option>
+    <option value="3">2I1026 (KTH) - Introduktion till informationsteknologi, 7.50 hp</option>
+    <option value="6">2I1029 (KTH) - Människa-dator interaktion, 6.00 hp</option>
+    <option value="7">2I1030 (KTH) - Introduktion till datasäkerhet, 6.00 hp</option>
+    <option value="1069">2I1075 (KTH) - Databasteknik, 6.00 hp</option>
+    <option value="15">2I1100 (KTH) - Informationssystem och databasteknik, 9.00 hp</option>
+    <option value="23">2I1197 (KTH) - Systemteori, 4.50 hp</option>
+    <option value="280">2I1501 (KTH) - Introduction to Information Security and its Environment, 15.00 hp</option>
+    <option value="295">2I1607 (KTH) - Databaser, 6.00 hp</option>
+    <option value="287">2I1651 (KTH) - Management med IT I, 30.00 hp</option>
+    <option value="298">2I1652 (KTH) - Management med IT II, 30.00 hp</option>
+    <option value="288">2I1661 (KTH) - IT-Management I, 30.00 hp</option>
+    <option value="299">2I1662 (KTH) - IT-Management II, 30.00 hp</option>
+    <option value="982">2I1704 (KTH) - Avancerad individuell kurs i ITK/människa-datorinteraktion, 6.00 hp</option>
+    <option value="73">2I4016 (KTH) - It-management, ii, 7.50 hp</option>
+    <option value="101">2I4086 (KTH) - Databasmetodik, 6.00 hp</option>
+    <option value="319">2I4111 (KTH) - Projects and Powergames, 6.00 hp</option>
+    <option value="643">2I4118 (KTH) - Introduction to Information Security and its Environment, 15.00 hp</option>
+    <option value="732">2I4161 (KTH) - IT-Management I, 30.00 hp</option>
+    <option value="275">5B1215 (KTH) - Matematiska metoder, 18.00 hp</option>
+    <option value="32033">IB101B (SU) - Data- och systemvetenskap I, 30.00 hp</option>
+    <option value="122">IB1020 (SU) - Grundkurs i data- och systemvetenskap, 30.00 hp</option>
+    <option value="28398">IB102B (SU) - Data- och systemvetenskap I, 30.00 hp</option>
+    <option value="28464">IB103B (SU) - Data- och systemvetenskap I (EIT), 30.00 hp</option>
+    <option value="124">IB1050 (SU) - Baskurs i data- och systemvetenskap, 60.00 hp</option>
+    <option value="35280">IB106C (SU) - Datorspelsutveckling I, 30.00 hp</option>
+    <option value="39979">IB106D (SU) - Datorspelsutveckling I, design, 30.00 hp</option>
+    <option value="39944">IB106K (SU) - Datorspelsutveckling I, konstruktion, 30.00 hp</option>
+    <option value="35292">IB107C (SU) - Datavetenskap I, 30.00 hp</option>
+    <option value="36880">IB108C (SU) - IT och kommunikationsvetenskap I, 30.00 hp</option>
+    <option value="36881">IB109C (SU) - IT och interaktionsdesign I, 30.00 hp</option>
+    <option value="125">IB1100 (SU) - Data- och systemvetenskap, årskurs 1, 60.00 hp</option>
+    <option value="36882">IB110C (SU) - Data- och systemvetenskap med inriktning mot digitala medier, 30.00 hp</option>
+    <option value="38204">IB111C (SU) - Data- och systemvetenskap I, 30.00 hp</option>
+    <option value="1005">IB1150 (SU) - Datorspelutveckling, 60.00 hp</option>
+    <option value="28491">IB115B (SU) - Grunder inom datorspelutveckling, 60.00 hp</option>
+    <option value="127">IB1200 (SU) - Data- och systemvetenskap, årskurs 2, 60.00 hp</option>
+    <option value="207">IB1600 (SU) - IT och kommunikationsvetenskap, baskurs, 60.00 hp</option>
+    <option value="29443">IB201B (SU) - Data- och systemvetenskap II, 30.00 hp</option>
+    <option value="130">IB2020 (SU) - Fortsättningskurs i data- och systemvetenskap, 30.00 hp</option>
+    <option value="29444">IB202B (SU) - Data- och systemvetenskap II, 30.00 hp</option>
+    <option value="31620">IB203B (SU) - Data- och systemvetenskap II, 30.00 hp</option>
+    <option value="50138">IB203N (SU) - Data- och systemvetenskap II (Ekonomi och IT), 30.00 hp</option>
+    <option value="131">IB2040 (SU) - Kurs för datayrkesverksamma, 15.00 hp</option>
+    <option value="35281">IB206C (SU) - Datorspelsutveckling II, 30.00 hp</option>
+    <option value="40591">IB206D (SU) - Datorspelsutveckling II, design, 30.00 hp</option>
+    <option value="40592">IB206K (SU) - Datorspelsutveckling II, konstruktion, 30.00 hp</option>
+    <option value="35293">IB207C (SU) - Datavetenskap II, 30.00 hp</option>
+    <option value="36883">IB208C (SU) - IT och kommunikationsvetenskap II, 30.00 hp</option>
+    <option value="50139">IB208N (SU) - Marknadskommunikation och IT II, 30.00 hp</option>
+    <option value="36884">IB209C (SU) - IT och interaktionsdesign II, 30.00 hp</option>
+    <option value="41861">IB210C (SU) - Data- och systemvetenskap med inriktning mot digitala medier II, 30.00 hp</option>
+    <option value="39409">IB211C (SU) - Data- och systemvetenskap med affärssystem, 22.50 hp</option>
+    <option value="31619">IB302B (SU) - Data- och systemvetenskap III, 30.00 hp</option>
+    <option value="50140">IB302N (SU) - Data- och systemvetenskap III, 30.00 hp</option>
+    <option value="36879">IB303C (SU) - Data- och systemvetenskap III, 30.00 hp</option>
+    <option value="134">IB3040 (SU) - Påbyggnadskurs i data- och systemvetenskap, 30.00 hp</option>
+    <option value="29507">IB304B (SU) - Data- och systemvetenskap III, 30.00 hp</option>
+    <option value="35282">IB306C (SU) - Datorspelsutveckling III, 30.00 hp</option>
+    <option value="39958">IB306D (SU) - Datorspelsutveckling III, design, 30.00 hp</option>
+    <option value="39959">IB306K (SU) - Datorspelsutveckling III, konstruktion, 30.00 hp</option>
+    <option value="50141">IB306N (SU) - Datorspelsutveckling III, 30.00 hp</option>
+    <option value="137">IB3070 (SU) - Påbyggnadskurs(särskilt internet) i data- och systemvetenskap, 30.00 hp</option>
+    <option value="35294">IB307C (SU) - Datavetenskap III, 30.00 hp</option>
+    <option value="50142">IB307N (SU) - Datavetenskap III, 30.00 hp</option>
+    <option value="36885">IB308C (SU) - Påbyggnadskurs i marknadskommunikation och IT, 15.00 hp</option>
+    <option value="38205">IB309C (SU) - Fortsättningskurs i interaktionsdesign, 30.00 hp</option>
+    <option value="50143">IB309N (SU) - IT och interaktionsdesign III, 30.00 hp</option>
+    <option value="138">IB3100 (SU) - Fortbildningskurs i informationsteknologi I, 15.00 hp</option>
+    <option value="31994">IB310B (SU) - Fortbildningskurs i informationsteknologi I, 15.00 hp</option>
+    <option value="42948">IB310C (SU) - Data- och systemvetenskap med inriktning mot digitala medier III, 30.00 hp</option>
+    <option value="52075">IB310N (SU) - Data- och systemvetenskap med inriktning mot digitala medier III, 30.00 hp</option>
+    <option value="39955">IB311C (SU) - Data- och systemvetenskap med affärssystem och tjänstedesign I, 22.50 hp</option>
+    <option value="50144">IB311N (SU) - Data- och systemvetenskap med affärssystem och tjänstedesign III, 22.50 hp</option>
+    <option value="29445">IB315B (SU) - Valbar kurs i data- och systemvetenskap, 7.50 hp</option>
+    <option value="36888">IB316C (SU) - Valbar kurs i data- och systemvetenskap, 7.50 hp</option>
+    <option value="34569">IB317B (SU) - Valbar kurs i data- och systemvetenskap II, 7.50 hp</option>
+    <option value="36896">IB318C (SU) - Valbar kurs i data- och systemvetenskap, 7.50 hp</option>
+    <option value="139">IB3200 (SU) - Fortbildningskurs i informationsteknologi II, 15.00 hp</option>
+    <option value="31995">IB320B (SU) - Fortbildningskurs i informationsteknologi II, 15.00 hp</option>
+    <option value="29446">IB325B (SU) - Valbar avancerad kurs  i data- och systemvetenskap, 7.50 hp</option>
+    <option value="36894">IB326C (SU) - Valbar avancerad kurs i data- och systemvetenskap, 7.50 hp</option>
+    <option value="36897">IB327C (SU) - Valbar avancerad kurs i data- och systemvetenskap, 7.50 hp</option>
+    <option value="36898">IB328C (SU) - Valbar avancerad kurs i data- och systemvetenskap, 15.00 hp</option>
+    <option value="735">IB3300 (SU) - Fortbildningskurs i informationsteknologi III, 15.00 hp</option>
+    <option value="31996">IB330B (SU) - Fortbildningskurs i informationsteknologi III, 15.00 hp</option>
+    <option value="29447">IB335B (SU) - Valbar avancerad kurs  i data- och systemvetenskap, 7.50 hp</option>
+    <option value="301">IB3500 (SU) - Datorspelsutveckling I, 15.00 hp</option>
+    <option value="28399">IB350B (SU) - Datorspelutveckling I, 15.00 hp</option>
+    <option value="625">IB3550 (SU) - Datorspelsutveckling II, 15.00 hp</option>
+    <option value="28528">IB355B (SU) - Datorspelutveckling II, 15.00 hp</option>
+    <option value="36929">IB3D1C (SU) - Kreativ 3D-animation I, 22.50 hp</option>
+    <option value="36930">IB3D2C (SU) - Kreativ 3D-animation II, 30.00 hp</option>
+    <option value="140">IB4010 (SU) - Fördjupningskurs i data- och systemvetenskap, 30.00 hp</option>
+    <option value="29509">IB401B (SU) - Data- och systemvetenskap IV, 30.00 hp</option>
+    <option value="34551">IB402C (SU) - Data- och systemvetenskap IV, 30.00 hp</option>
+    <option value="42949">IB402E (SU) - Data- och systemvetenskap IV, 30.00 hp</option>
+    <option value="35904">IB403C (SU) - Specialiserad kurs i data- och systemvetenskap, 15.00 hp</option>
+    <option value="34552">IB406C (SU) - Datorspelsutveckling IV, 30.00 hp</option>
+    <option value="35905">IB406D (SU) - Datorspelsutveckling IV (design), 30.00 hp</option>
+    <option value="42950">IB406E (SU) - Datorspelsutveckling IV, design, 30.00 hp</option>
+    <option value="42951">IB406F (SU) - Datorspelsutveckling IV, konstruktion, 30.00 hp</option>
+    <option value="51359">IB406N (SU) - Datorspelsutveckling IV, 22.50 hp</option>
+    <option value="37500">IB407C (SU) - Datavetenskap IV, 30.00 hp</option>
+    <option value="42952">IB407E (SU) - Datavetenskap IV, 30.00 hp</option>
+    <option value="35906">IB408C (SU) - Påbyggnadskurs i marknadskommunikation och IT, 15.00 hp</option>
+    <option value="42960">IB409C (SU) - Påbyggnadskurs i interaktionsdesign, 22.50 hp</option>
+    <option value="39379">IB410C (SU) - Data- och systemvetenskap med inriktning mot digitala medier II, 30.00 hp</option>
+    <option value="52344">IB410N (SU) - Data- och systemvetenskap med inriktning mot digitala medier IV, 22.50 hp</option>
+    <option value="40590">IB411C (SU) - Data- och systemvetenskap med affärssystem och tjänstedesign II, 30.00 hp</option>
+    <option value="52345">IB411N (SU) - Data- och systemvetenskap med affärssystem och tjänstedesign IV, 30.00 hp</option>
+    <option value="35283">IB502C (SU) - Data- och systemvetenskap V, 30.00 hp</option>
+    <option value="35284">IB506C (SU) - Datorspelsutveckling V, 30.00 hp</option>
+    <option value="144">IB5500 (SU) - Fördjupningskurs i data- och systemvetenskap för magisterexamen, 30.00 hp</option>
+    <option value="146">IB5600 (SU) - Magisterkurs i data- och systemvetenskap, 30.00 hp</option>
+    <option value="148">IB5900 (SU) - Magisterkurs i kognitionsvetenskap I, 30.00 hp</option>
+    <option value="149">IB5910 (SU) - Magisterkurs i kognitionsvetenskap II, 15.00 hp</option>
+    <option value="205">IB6000 (SU) - Säkerhetsinformatik Ib, 7.50 hp</option>
+    <option value="28529">IB600B (SU) - Säkerhetsinformatik 1b, 7.50 hp</option>
+    <option value="151">IB6020 (SU) - Säkerhetsinformatik och systemskydd, 15.00 hp</option>
+    <option value="35285">IB602C (SU) - Data- och systemvetenskap VI, 15.00 hp</option>
+    <option value="28400">IB604B (SU) - Säkerhetsinformatik I, 15.00 hp</option>
+    <option value="153">IB6050 (SU) - Säkerhetsinformatik II, 15.00 hp</option>
+    <option value="29458">IB605B (SU) - Säkerhetsinformatik II, 15.00 hp</option>
+    <option value="154">IB6060 (SU) - Säkerhetsinformatik III, 15.00 hp</option>
+    <option value="28700">IB606B (SU) - Säkerhetsinformatik III, 15.00 hp</option>
+    <option value="155">IB6070 (SU) - Projektarbete i data- och systemvetenskap, 15.00 hp</option>
+    <option value="736">IB6160 (SU) - Säkerhetsinformatik IV, 15.00 hp</option>
+    <option value="28693">IB616B (SU) - Säkerhetsinformatik IV, 15.00 hp</option>
+    <option value="162">IB6170 (SU) - Examensarbete i data- och systemvetenskap, 15.00 hp</option>
+    <option value="168">IB6300 (SU) - Management - IT (MIT) I, 30.00 hp</option>
+    <option value="169">IB6320 (SU) - Management-IT (MIT) II, 30.00 hp</option>
+    <option value="170">IB6340 (SU) - Management-IT (MIT) III, 30.00 hp</option>
+    <option value="171">IB6360 (SU) - Management-IT (MIT) IV, 30.00 hp</option>
+    <option value="27722">IB7250 (SU) - Valbar avancerad kurs I i data- och systemvetenskap, 7.50 hp</option>
+    <option value="27723">IB7300 (SU) - Valbar avancerad kurs II i data- och systemvetenskap, 7.50 hp</option>
+    <option value="28701">IB901B (SU) - Internetprogrammering I, 7.50 hp</option>
+    <option value="627">IB9030 (SU) - Internetprogrammering II, 7.50 hp</option>
+    <option value="28702">IB903B (SU) - Internetprogrammering II, 7.50 hp</option>
+    <option value="638">IB9200 (SU) - Översiktskurs i data- och systemvetenskap, 15.00 hp</option>
+    <option value="28694">IB920B (SU) - Översiktskurs i data- och systemvetenskap, 15.00 hp</option>
+    <option value="25194">IB9450 (SU) - Datakunskap, 7.50 hp</option>
+    <option value="34420">IBL01C (SU) - Data- och systemvetenskap för lärare, baskurs, 15.00 hp</option>
+    <option value="34421">IBL02C (SU) - Data- och systemvetenskap för lärare, utökad kurs, 22.50 hp</option>
+    <option value="26353">IC1000 (KTH) - Människa-dator interaktion, 6.00 hp</option>
+    <option value="26365">IC2004 (KTH) - Forskningsmetodik och vetenskaplig kommunikation, 7.50 hp</option>
+    <option value="26366">IC2005 (KTH) - Metoder för interaktionsdesign, 7.50 hp</option>
+    <option value="26371">IC2010 (KTH) - Avancerad individuell kurs i itk/människa-datorinteraktion, 7.50 hp</option>
+    <option value="35137">ID1017 (KTH) - Besluts-  och riskanalys, 7.50 hp</option>
+    <option value="26651">IV1013 (KTH) - Introduktion till datasäkerhet, 7.50 hp</option>
+    <option value="28459">IV1017 (KTH) - Objektorienterad analys och design, 7.50 hp</option>
+    <option value="29441">IV1018 (KTH) - Modeller och databaser, 7.50 hp</option>
+    <option value="26671">IV1371 (KTH) - Affärssystem, val och användning, 7.50 hp</option>
+    <option value="26714">IV2018 (KTH) - Introduction to information security and its environment, 15.00 hp</option>
+    <option value="26722">IV2024 (KTH) - Principer för datasäkerhet, 7.50 hp</option>
+    <option value="29065">IV2032 (KTH) - Kravhantering, 7.50 hp</option>
+    <option value="28631">ML000B (SU) - Vetenskaplig kommunikation och forskningsmetodik, 15.00 hp</option>
+    <option value="28632">ML012B (SU) - Kompletteringskurs i data- och systemvetenskap, 15.00 hp</option>
+    <option value="28494">ML013B (SU) - Valfri fördjupning i data- och systemvetenskap 1, 30.00 hp</option>
+    <option value="36291">ML013C (SU) - Strategisk IT-management inom data- och systemvetenskap, 15.00 hp</option>
+    <option value="36689">ML013U (SU) - Valfri fördjupning i data- och systemvetenskap, 30.00 hp</option>
+    <option value="28495">ML014B (SU) - Valfri fördjupning i data- och systemvetenskap 2, 30.00 hp</option>
+    <option value="36890">ML014C (SU) - Strategisk IT-management inom data- och systemvetenskap II, 15.00 hp</option>
+    <option value="29469">ML041B (SU) - Tekniskt orienterade säkerhetsaspekter, 30.00 hp</option>
+    <option value="29470">ML042B (SU) - Organisatoriskt orienterade säkerhetsaspekter, 22.50 hp</option>
+    <option value="28555">ML061B (SU) - Grunder i ICT för utveckling, 15.00 hp</option>
+    <option value="29449">ML062B (SU) - Fortsättning i ICT management, 15.00 hp</option>
+    <option value="35287">ML101C (SU) - Fördjupning i data- och systemvetenskap I, 22.50 hp</option>
+    <option value="36292">ML102C (SU) - Valfri fördjupning i data- och systemvetenskap I, 22.50 hp</option>
+    <option value="52081">ML103N (SU) - Strategisk ledning med informationssystem, 22.50 hp</option>
+    <option value="50114">ML115N (SU) - Fördjupningskurs i data- och systemvetenskap, 15.00 hp</option>
+    <option value="36895">ML121C (SU) - Grunder inom informationssystem, 22.50 hp</option>
+    <option value="36902">ML122C (SU) - Ledning och utveckling av affärssystem, 22.50 hp</option>
+    <option value="29473">ML130B (SU) - Animation, 7.50 hp</option>
+    <option value="51334">ML412N (SU) - Data science för hälsoinformatik, 7.50 hp</option>
+    <option value="52351">ML437N (SU) - Programmering för data science, 7.50 hp</option>
+    <option value="182">ML8200 (SU) - IT och kommunikationsvetenskap, 30.00 hp</option>
+    <option value="28496">ML820B (SU) - IT och kommunikationsvetenskap I, 30.00 hp</option>
+    <option value="183">ML8250 (SU) - IT och kommunikationsvetenskap, fortsättningskurs, 30.00 hp</option>
+    <option value="25269">ML8270 (SU) - IT och kommunikationsvetenskap, fortsättningskurs I, 22.50 hp</option>
+    <option value="28497">ML827B (SU) - IT och kommunikationsvetenskap II, 22.50 hp</option>
+    <option value="588">ML8300 (SU) - Påbyggnadskurs i IT och kommunikationsvetenskap, 45.00 hp</option>
+    <option value="35241">ML830C (SU) - IT och kommunikationsvetenskap III, 45.00 hp</option>
+    <option value="184">ML8500 (SU) - Data- och systemvetenskapliga linjen, årskurs 1, 60.00 hp</option>
+    <option value="185">ML8600 (SU) - Data- och systemvetenskapliga linjen, årskurs 2, 60.00 hp</option>
+    <option value="186">ML8700 (SU) - Årskurs 3 på data- och systemvetenskapliga linjen, 60.00 hp</option>
+    <option value="187">ML8710 (SU) - Data- och systemvetenskaplig linje, påbyggnad, 30.00 hp</option>
+    <option value="188">ML8800 (SU) - Data- och systemvetenskaplig linje, fördjupning, 30.00 hp</option>
+</select>
+
+</div> </div>
+
+    Kurs-/Delkursansvarig
+    <div id="wwgrp_momansvselecta" class="wwgrp">
+<div id="wwctrl_momansvselecta" class="wwctrl">
+<script type="text/javascript" src="/script/bsn.AutoSuggest_c_2.0.js?v=20260511195807"></script>
+<script type="text/javascript" src="/script/daisy.js?v=20260511195807"></script>
+
+<a id="visapers_momansvselecta"
+
+	href="#"><img src="/bilder/ikoner/16/user_find.png" class="ikon16" height="16" width="16" id="pers_visa_momansvselecta" title="" alt="" /></a>&nbsp;&nbsp;<input
+		type="text"		name="searchTerm"		value=""		id="momansvselecta"		class="falt17"		/><input type="hidden"
+				 id="momansvselecta_hidden"
+				 value=""				 name="momentansvID"/>
+<script type="text/javascript">
+
+	var options = {
+		script: "/sok/sokpersonjson.jspa?employee=true&",
+		varname: "searchTerm",
+		json: true,
+		noresults: "Inga resultat",
+		cache: false,
+		callback: function(id) {
+			if (id) {
+				var url = "";
+				document.getElementById('momansvselecta_hidden').value = id['id'];
+				if (id['id'] != '' && id['id'] != '0') {
+					url = "/anstalld/anstalldinfo.jspa?personID=";
+					if (url === "") {
+						document.getElementById('visapers_momansvselecta').href = '#';
+						document.getElementById('visapers_momansvselecta').onclick = null;
+					} else {
+						document.getElementById('visapers_momansvselecta').href = url + id['id'];
+						document.getElementById('visapers_momansvselecta').onclick = function()
+						{
+                                return !anstalldinfo(this, document.getElementById('momansvselecta_hidden').value);
+						}
+					}
+					document.getElementById('pers_visa_momansvselecta').src = '/bilder/ikoner/16/user.png';
+				} else {
+					document.getElementById('visapers_momansvselecta').href = '#';
+					document.getElementById('visapers_momansvselecta').onclick = null;
+					document.getElementById('pers_visa_momansvselecta').src = '/bilder/ikoner/16/user_find.png';
+				}
+							}
+			else
+			{
+				document.getElementById('visapers_momansvselecta').href = '#';
+				document.getElementById('visapers_momansvselecta').onclick = null;
+				document.getElementById('momansvselecta_hidden').value = "";
+				document.getElementById('pers_visa_momansvselecta').src = '/bilder/ikoner/16/user_find.png';
+			}
+		}
+	};
+	var as = new AutoSuggest('momansvselecta', options);
+</script>
+</div> </div>
+
+
+    <div style="margin-bottom: 5px;"></div>
+
+    <div id="wwgrp_sokmomform_institution" class="wwgrp">
+<div id="wwlbl_sokmomform_institution" class="wwlbl">
+<label for="sokmomform_institution" class="label">        Institution:
+</label></div> <br /><div id="wwctrl_sokmomform_institution" class="wwctrl">
+<select name="institution" id="sokmomform_institution" style="margin-bottom: 5px;">
+    <option value=""></option>
+    <option value="4" selected="selected">Institutionen för data- och systemvetenskap (DSV) (SU)</option>
+</select>
+
+</div> </div>
+
+    <input type="hidden" name="searchInstInUnits" value="true" id="sokmomform_searchInstInUnits"/>
+    <div id="wwgrp_sokmomform_nyckelbegrepp" class="wwgrp">
+<div id="wwlbl_sokmomform_nyckelbegrepp" class="wwlbl">
+<label for="sokmomform_nyckelbegrepp" class="label">        Nyckelbegrepp:
+</label></div> <br /><div id="wwctrl_sokmomform_nyckelbegrepp" class="wwctrl">
+<input type="text" name="nyckelbegrepp" value="" id="sokmomform_nyckelbegrepp" style="margin-bottom: 5px;"/></div> </div>
+
+
+    <div id="wwgrp_sokmomform_fromTerminID" class="wwgrp">
+<div id="wwlbl_sokmomform_fromTerminID" class="wwlbl">
+<label for="sokmomform_fromTerminID" class="label">        Fr.o.m.:
+</label></div> <br /><div id="wwctrl_sokmomform_fromTerminID" class="wwctrl">
+<select name="fromTerminID" id="sokmomform_fromTerminID" style="margin-bottom: 5px;">
+    <option value="20262">HT2026</option>
+    <option value="20261" selected="selected">VT2026</option>
+    <option value="20252">HT2025</option>
+    <option value="20251">VT2025</option>
+    <option value="20242">HT2024</option>
+    <option value="20241">VT2024</option>
+    <option value="20232">HT2023</option>
+    <option value="20231">VT2023</option>
+    <option value="20222">HT2022</option>
+    <option value="20221">VT2022</option>
+    <option value="20212">HT2021</option>
+    <option value="20211">VT2021</option>
+    <option value="20202">HT2020</option>
+    <option value="20201">VT2020</option>
+    <option value="20192">HT2019</option>
+    <option value="20191">VT2019</option>
+    <option value="20182">HT2018</option>
+    <option value="20181">VT2018</option>
+    <option value="20172">HT2017</option>
+    <option value="20171">VT2017</option>
+    <option value="20162">HT2016</option>
+    <option value="20161">VT2016</option>
+    <option value="20152">HT2015</option>
+    <option value="20151">VT2015</option>
+    <option value="20142">HT2014</option>
+    <option value="20141">VT2014</option>
+    <option value="20132">HT2013</option>
+    <option value="20131">VT2013</option>
+    <option value="20122">HT2012</option>
+    <option value="20121">VT2012</option>
+    <option value="20112">HT2011</option>
+    <option value="20111">VT2011</option>
+    <option value="20102">HT2010</option>
+    <option value="20101">VT2010</option>
+    <option value="20092">HT2009</option>
+    <option value="20091">VT2009</option>
+    <option value="20082">HT2008</option>
+    <option value="20081">VT2008</option>
+    <option value="20072">HT2007</option>
+    <option value="20071">VT2007</option>
+    <option value="20062">HT2006</option>
+    <option value="20061">VT2006</option>
+    <option value="20052">HT2005</option>
+    <option value="20051">VT2005</option>
+    <option value="20042">HT2004</option>
+    <option value="20041">VT2004</option>
+    <option value="20032">HT2003</option>
+    <option value="20031">VT2003</option>
+    <option value="20022">HT2002</option>
+    <option value="20021">VT2002</option>
+    <option value="20012">HT2001</option>
+    <option value="20011">VT2001</option>
+    <option value="20002">HT2000</option>
+    <option value="20001">VT2000</option>
+    <option value="19992">HT1999</option>
+</select>
+
+</div> </div>
+
+
+    <div id="wwgrp_sokmomform_tomTerminID" class="wwgrp">
+<div id="wwlbl_sokmomform_tomTerminID" class="wwlbl">
+<label for="sokmomform_tomTerminID" class="label">        T.o.m.:
+</label></div> <br /><div id="wwctrl_sokmomform_tomTerminID" class="wwctrl">
+<select name="tomTerminID" id="sokmomform_tomTerminID" style="margin-bottom: 5px;">
+    <option value="20262">HT2026</option>
+    <option value="20261" selected="selected">VT2026</option>
+    <option value="20252">HT2025</option>
+    <option value="20251">VT2025</option>
+    <option value="20242">HT2024</option>
+    <option value="20241">VT2024</option>
+    <option value="20232">HT2023</option>
+    <option value="20231">VT2023</option>
+    <option value="20222">HT2022</option>
+    <option value="20221">VT2022</option>
+    <option value="20212">HT2021</option>
+    <option value="20211">VT2021</option>
+    <option value="20202">HT2020</option>
+    <option value="20201">VT2020</option>
+    <option value="20192">HT2019</option>
+    <option value="20191">VT2019</option>
+    <option value="20182">HT2018</option>
+    <option value="20181">VT2018</option>
+    <option value="20172">HT2017</option>
+    <option value="20171">VT2017</option>
+    <option value="20162">HT2016</option>
+    <option value="20161">VT2016</option>
+    <option value="20152">HT2015</option>
+    <option value="20151">VT2015</option>
+    <option value="20142">HT2014</option>
+    <option value="20141">VT2014</option>
+    <option value="20132">HT2013</option>
+    <option value="20131">VT2013</option>
+    <option value="20122">HT2012</option>
+    <option value="20121">VT2012</option>
+    <option value="20112">HT2011</option>
+    <option value="20111">VT2011</option>
+    <option value="20102">HT2010</option>
+    <option value="20101">VT2010</option>
+    <option value="20092">HT2009</option>
+    <option value="20091">VT2009</option>
+    <option value="20082">HT2008</option>
+    <option value="20081">VT2008</option>
+    <option value="20072">HT2007</option>
+    <option value="20071">VT2007</option>
+    <option value="20062">HT2006</option>
+    <option value="20061">VT2006</option>
+    <option value="20052">HT2005</option>
+    <option value="20051">VT2005</option>
+    <option value="20042">HT2004</option>
+    <option value="20041">VT2004</option>
+    <option value="20032">HT2003</option>
+    <option value="20031">VT2003</option>
+    <option value="20022">HT2002</option>
+    <option value="20021">VT2002</option>
+    <option value="20012">HT2001</option>
+    <option value="20011">VT2001</option>
+    <option value="20002">HT2000</option>
+    <option value="20001">VT2000</option>
+    <option value="19992">HT1999</option>
+</select>
+
+</div> </div>
+
+    <div style="margin-top: 15px;">
+        <button style="margin-right: 20px;" type="submit">Sök</button>
+        <a href="/sok/visamoment.jspa" tabindex="-1"><button type="button">Rensa</button></a>
+    </div>
+</form>
+
+
+
+
+
+    <br/>
+    <h3>Sökresultat</h3>
+    <br/>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div>
+
+
+
+
+
+
+					<strong>1</strong>
+
+
+
+
+
+					<a href="/sok/sokmoment.jspa?beteckning=&amp;namn=&amp;kursID=&amp;searchTerm=&amp;momentansvID=&amp;institution=4&amp;searchInstInUnits=true&amp;nyckelbegrepp=&amp;fromTerminID=20261&amp;tomTerminID=20261&amp;querypage=1">2</a>
+
+
+
+
+
+
+					<a href="/sok/sokmoment.jspa?beteckning=&amp;namn=&amp;kursID=&amp;searchTerm=&amp;momentansvID=&amp;institution=4&amp;searchInstInUnits=true&amp;nyckelbegrepp=&amp;fromTerminID=20261&amp;tomTerminID=20261&amp;querypage=2">3</a>
+
+
+
+
+
+
+					<a href="/sok/sokmoment.jspa?beteckning=&amp;namn=&amp;kursID=&amp;searchTerm=&amp;momentansvID=&amp;institution=4&amp;searchInstInUnits=true&amp;nyckelbegrepp=&amp;fromTerminID=20261&amp;tomTerminID=20261&amp;querypage=3">4</a>
+
+
+
+
+
+
+
+		<a href="/sok/sokmoment.jspa?beteckning=&amp;namn=&amp;kursID=&amp;searchTerm=&amp;momentansvID=&amp;institution=4&amp;searchInstInUnits=true&amp;nyckelbegrepp=&amp;fromTerminID=20261&amp;tomTerminID=20261&amp;querypage=1">Nästa<img src="/bilder/ikoner/16/navigate_right.png" class="ikon16" height="16" width="16" title="Nästa" alt="Nästa" /></a>
+
+</div>
+
+	<div>
+		Resultat 1 till 20 av 70
+	</div>
+
+
+            <table cellspacing="0">
+                <tr>
+                    <th>&nbsp;</th>
+                    <th>&nbsp;</th>
+                    <th>&nbsp;</th>
+                    <th>Kurs-/Delkursnamn</th>
+                    <th>Högskolepoäng</th>
+                    <th>Termin</th>
+                    <th>Tidsperiod</th>
+                    <th>Beteckning</th>
+                </tr>
+
+
+                    <tr class="odd">
+                        <td>
+
+
+
+
+
+
+
+
+<a href="/servlet/momentinfo.Momentinfo?id=7584" onclick="return !lankopen(this, 'momenttillfinfo7584', 640, 450)">
+    <img src="/bilder/ikoner/16/information.png" class="ikon16" height="16" width="16" title="Kurs-/delkursinformation" alt="Kurs-/delkursinformation" />
+</a>
+
+
+                        </td>
+                        <td>
+
+
+
+                            <a href="/servlet/schema.moment.Momentschema?id=7584" onclick="return !lankopen(this,'mtschema_7584',700,800);"><img src="/bilder/ikoner/16/date-time.png" class="ikon16" height="16" width="16" title="Schema" alt="Schema" /></a>
+                        </td>
+                        <td>
+
+
+
+
+                                <a href="/anstalld/moment/deltagarlista.jspa?momenttillfID=7584" onclick="return !lankopen(this,'deltagarWindow7584',680,550);"><img src="/bilder/ikoner/16/users.png" class="ikon16" height="16" width="16" title="Deltagarlista" alt="Deltagarlista" /></a>
+
+                        </td>
+                        <td>Yrkesf&ouml;rberedande praktik inom data- och systemvetenskap</td>
+                        <td>15</td>
+                        <td>
+
+                            VT2026
+                        </td>
+                        <td>
+                            2026-01-19 -- 2026-06-07
+                        </td>
+                        <td>
+
+                            YRPRA
+                        </td>
+                    </tr>
+
+
+                    <tr class="even">
+                        <td>
+
+
+
+
+
+
+
+
+<a href="/servlet/momentinfo.Momentinfo?id=7587" onclick="return !lankopen(this, 'momenttillfinfo7587', 640, 450)">
+    <img src="/bilder/ikoner/16/information.png" class="ikon16" height="16" width="16" title="Kurs-/delkursinformation" alt="Kurs-/delkursinformation" />
+</a>
+
+
+                        </td>
+                        <td>
+
+
+
+                            <a href="/servlet/schema.moment.Momentschema?id=7587" onclick="return !lankopen(this,'mtschema_7587',700,800);"><img src="/bilder/ikoner/16/date-time.png" class="ikon16" height="16" width="16" title="Schema" alt="Schema" /></a>
+                        </td>
+                        <td>
+
+
+
+
+                                <a href="/anstalld/moment/deltagarlista.jspa?momenttillfID=7587" onclick="return !lankopen(this,'deltagarWindow7587',680,550);"><img src="/bilder/ikoner/16/users.png" class="ikon16" height="16" width="16" title="Deltagarlista" alt="Deltagarlista" /></a>
+
+                        </td>
+                        <td>Webbutveckling I</td>
+                        <td>7,5</td>
+                        <td>
+
+                            VT2026
+                        </td>
+                        <td>
+                            2026-01-19 -- 2026-03-22
+                        </td>
+                        <td>
+
+                            WPROG1 (AB)
+                        </td>
+                    </tr>
+
+
+                    <tr class="odd">
+                        <td>
+
+
+
+
+
+
+
+
+<a href="/servlet/momentinfo.Momentinfo?id=7588" onclick="return !lankopen(this, 'momenttillfinfo7588', 640, 450)">
+    <img src="/bilder/ikoner/16/information.png" class="ikon16" height="16" width="16" title="Kurs-/delkursinformation" alt="Kurs-/delkursinformation" />
+</a>
+
+
+                        </td>
+                        <td>
+
+
+
+                            <a href="/servlet/schema.moment.Momentschema?id=7588" onclick="return !lankopen(this,'mtschema_7588',700,800);"><img src="/bilder/ikoner/16/date-time.png" class="ikon16" height="16" width="16" title="Schema" alt="Schema" /></a>
+                        </td>
+                        <td>
+
+
+
+
+                                <a href="/anstalld/moment/deltagarlista.jspa?momenttillfID=7588" onclick="return !lankopen(this,'deltagarWindow7588',680,550);"><img src="/bilder/ikoner/16/users.png" class="ikon16" height="16" width="16" title="Deltagarlista" alt="Deltagarlista" /></a>
+
+                        </td>
+                        <td>Webbutveckling II</td>
+                        <td>7,5</td>
+                        <td>
+
+                            VT2026
+                        </td>
+                        <td>
+                            2026-01-19 -- 2026-03-22
+                        </td>
+                        <td>
+
+                            WPROG2 (AB)
+                        </td>
+                    </tr>
+
+
+                    <tr class="even">
+                        <td>
+
+
+
+
+
+
+
+
+<a href="/servlet/momentinfo.Momentinfo?id=7590" onclick="return !lankopen(this, 'momenttillfinfo7590', 640, 450)">
+    <img src="/bilder/ikoner/16/information.png" class="ikon16" height="16" width="16" title="Kurs-/delkursinformation" alt="Kurs-/delkursinformation" />
+</a>
+
+
+                        </td>
+                        <td>
+
+
+
+                            <a href="/servlet/schema.moment.Momentschema?id=7590" onclick="return !lankopen(this,'mtschema_7590',700,800);"><img src="/bilder/ikoner/16/date-time.png" class="ikon16" height="16" width="16" title="Schema" alt="Schema" /></a>
+                        </td>
+                        <td>
+
+
+
+
+                                <a href="/anstalld/moment/deltagarlista.jspa?momenttillfID=7590" onclick="return !lankopen(this,'deltagarWindow7590',680,550);"><img src="/bilder/ikoner/16/users.png" class="ikon16" height="16" width="16" title="Deltagarlista" alt="Deltagarlista" /></a>
+
+                        </td>
+                        <td>Algoritmer och datastrukturer</td>
+                        <td>7,5</td>
+                        <td>
+
+                            VT2026
+                        </td>
+                        <td>
+                            2026-01-19 -- 2026-03-22
+                        </td>
+                        <td>
+
+                            ALDA
+                        </td>
+                    </tr>
+
+
+                    <tr class="odd">
+                        <td>
+
+
+
+
+
+
+
+
+<a href="/servlet/momentinfo.Momentinfo?id=7591" onclick="return !lankopen(this, 'momenttillfinfo7591', 640, 450)">
+    <img src="/bilder/ikoner/16/information.png" class="ikon16" height="16" width="16" title="Kurs-/delkursinformation" alt="Kurs-/delkursinformation" />
+</a>
+
+
+                        </td>
+                        <td>
+
+
+
+                            <a href="/servlet/schema.moment.Momentschema?id=7591" onclick="return !lankopen(this,'mtschema_7591',700,800);"><img src="/bilder/ikoner/16/date-time.png" class="ikon16" height="16" width="16" title="Schema" alt="Schema" /></a>
+                        </td>
+                        <td>
+
+
+
+
+                                <a href="/anstalld/moment/deltagarlista.jspa?momenttillfID=7591" onclick="return !lankopen(this,'deltagarWindow7591',680,550);"><img src="/bilder/ikoner/16/users.png" class="ikon16" height="16" width="16" title="Deltagarlista" alt="Deltagarlista" /></a>
+
+                        </td>
+                        <td>Visuell design</td>
+                        <td>7,5</td>
+                        <td>
+
+                            VT2026
+                        </td>
+                        <td>
+                            2026-01-19 -- 2026-03-22
+                        </td>
+                        <td>
+
+                            VISDES
+                        </td>
+                    </tr>
+
+
+                    <tr class="even">
+                        <td>
+
+
+
+
+
+
+
+
+<a href="/servlet/momentinfo.Momentinfo?id=7593" onclick="return !lankopen(this, 'momenttillfinfo7593', 640, 450)">
+    <img src="/bilder/ikoner/16/information.png" class="ikon16" height="16" width="16" title="Kurs-/delkursinformation" alt="Kurs-/delkursinformation" />
+</a>
+
+
+                        </td>
+                        <td>
+
+
+
+                            <a href="/servlet/schema.moment.Momentschema?id=7593" onclick="return !lankopen(this,'mtschema_7593',700,800);"><img src="/bilder/ikoner/16/date-time.png" class="ikon16" height="16" width="16" title="Schema" alt="Schema" /></a>
+                        </td>
+                        <td>
+
+
+
+
+                                <a href="/anstalld/moment/deltagarlista.jspa?momenttillfID=7593" onclick="return !lankopen(this,'deltagarWindow7593',680,550);"><img src="/bilder/ikoner/16/users.png" class="ikon16" height="16" width="16" title="Deltagarlista" alt="Deltagarlista" /></a>
+
+                        </td>
+                        <td>Anv&auml;ndarstudier inom interaktionsdesign</td>
+                        <td>7,5</td>
+                        <td>
+
+                            VT2026
+                        </td>
+                        <td>
+                            2026-01-19 -- 2026-03-22
+                        </td>
+                        <td>
+
+                            ASID
+                        </td>
+                    </tr>
+
+
+                    <tr class="odd">
+                        <td>
+
+
+
+
+
+
+
+
+<a href="/servlet/momentinfo.Momentinfo?id=7595" onclick="return !lankopen(this, 'momenttillfinfo7595', 640, 450)">
+    <img src="/bilder/ikoner/16/information.png" class="ikon16" height="16" width="16" title="Kurs-/delkursinformation" alt="Kurs-/delkursinformation" />
+</a>
+
+
+                        </td>
+                        <td>
+
+
+
+                            <a href="/servlet/schema.moment.Momentschema?id=7595" onclick="return !lankopen(this,'mtschema_7595',700,800);"><img src="/bilder/ikoner/16/date-time.png" class="ikon16" height="16" width="16" title="Schema" alt="Schema" /></a>
+                        </td>
+                        <td>
+
+
+
+
+                                <a href="/anstalld/moment/deltagarlista.jspa?momenttillfID=7595" onclick="return !lankopen(this,'deltagarWindow7595',680,550);"><img src="/bilder/ikoner/16/users.png" class="ikon16" height="16" width="16" title="Deltagarlista" alt="Deltagarlista" /></a>
+
+                        </td>
+                        <td>Abstrakta maskiner och formella spr&aring;k</td>
+                        <td>7,5</td>
+                        <td>
+
+                            VT2026
+                        </td>
+                        <td>
+                            2026-01-19 -- 2026-02-18
+                        </td>
+                        <td>
+
+                            AUTO
+                        </td>
+                    </tr>
+
+
+                    <tr class="even">
+                        <td>
+
+
+
+
+
+
+
+
+<a href="/servlet/momentinfo.Momentinfo?id=7596" onclick="return !lankopen(this, 'momenttillfinfo7596', 640, 450)">
+    <img src="/bilder/ikoner/16/information.png" class="ikon16" height="16" width="16" title="Kurs-/delkursinformation" alt="Kurs-/delkursinformation" />
+</a>
+
+
+                        </td>
+                        <td>
+
+
+
+                            <a href="/servlet/schema.moment.Momentschema?id=7596" onclick="return !lankopen(this,'mtschema_7596',700,800);"><img src="/bilder/ikoner/16/date-time.png" class="ikon16" height="16" width="16" title="Schema" alt="Schema" /></a>
+                        </td>
+                        <td>
+
+
+
+
+                                <a href="/anstalld/moment/deltagarlista.jspa?momenttillfID=7596" onclick="return !lankopen(this,'deltagarWindow7596',680,550);"><img src="/bilder/ikoner/16/users.png" class="ikon16" height="16" width="16" title="Deltagarlista" alt="Deltagarlista" /></a>
+
+                        </td>
+                        <td>Vetenskapligt skrivande</td>
+                        <td>7,5</td>
+                        <td>
+
+                            VT2026
+                        </td>
+                        <td>
+                            2026-01-19 -- 2026-03-22
+                        </td>
+                        <td>
+
+                            VESK (AB-period)
+                        </td>
+                    </tr>
+
+
+                    <tr class="odd">
+                        <td>
+
+
+
+
+
+
+
+
+<a href="/servlet/momentinfo.Momentinfo?id=7597" onclick="return !lankopen(this, 'momenttillfinfo7597', 640, 450)">
+    <img src="/bilder/ikoner/16/information.png" class="ikon16" height="16" width="16" title="Kurs-/delkursinformation" alt="Kurs-/delkursinformation" />
+</a>
+
+
+                        </td>
+                        <td>
+
+
+
+                            <a href="/servlet/schema.moment.Momentschema?id=7597" onclick="return !lankopen(this,'mtschema_7597',700,800);"><img src="/bilder/ikoner/16/date-time.png" class="ikon16" height="16" width="16" title="Schema" alt="Schema" /></a>
+                        </td>
+                        <td>
+
+
+
+
+                                <a href="/anstalld/moment/deltagarlista.jspa?momenttillfID=7597" onclick="return !lankopen(this,'deltagarWindow7597',680,550);"><img src="/bilder/ikoner/16/users.png" class="ikon16" height="16" width="16" title="Deltagarlista" alt="Deltagarlista" /></a>
+
+                        </td>
+                        <td>Beslutsanalys II</td>
+                        <td>7,5</td>
+                        <td>
+
+                            VT2026
+                        </td>
+                        <td>
+                            2026-01-19 -- 2026-03-22
+                        </td>
+                        <td>
+
+                            BEAN II
+                        </td>
+                    </tr>
+
+
+                    <tr class="even">
+                        <td>
+
+
+
+
+
+
+
+
+<a href="/servlet/momentinfo.Momentinfo?id=7599" onclick="return !lankopen(this, 'momenttillfinfo7599', 640, 450)">
+    <img src="/bilder/ikoner/16/information.png" class="ikon16" height="16" width="16" title="Kurs-/delkursinformation" alt="Kurs-/delkursinformation" />
+</a>
+
+
+                        </td>
+                        <td>
+
+
+
+                            <a href="/servlet/schema.moment.Momentschema?id=7599" onclick="return !lankopen(this,'mtschema_7599',700,800);"><img src="/bilder/ikoner/16/date-time.png" class="ikon16" height="16" width="16" title="Schema" alt="Schema" /></a>
+                        </td>
+                        <td>
+
+
+
+
+                                <a href="/anstalld/moment/deltagarlista.jspa?momenttillfID=7599" onclick="return !lankopen(this,'deltagarWindow7599',680,550);"><img src="/bilder/ikoner/16/users.png" class="ikon16" height="16" width="16" title="Deltagarlista" alt="Deltagarlista" /></a>
+
+                        </td>
+                        <td>Informations- och datas&auml;kerhet</td>
+                        <td>7,5</td>
+                        <td>
+
+                            VT2026
+                        </td>
+                        <td>
+                            2026-01-19 -- 2026-03-22
+                        </td>
+                        <td>
+
+                            S&Auml;K2
+                        </td>
+                    </tr>
+
+
+                    <tr class="odd">
+                        <td>
+
+
+
+
+
+
+
+
+<a href="/servlet/momentinfo.Momentinfo?id=7600" onclick="return !lankopen(this, 'momenttillfinfo7600', 640, 450)">
+    <img src="/bilder/ikoner/16/information.png" class="ikon16" height="16" width="16" title="Kurs-/delkursinformation" alt="Kurs-/delkursinformation" />
+</a>
+
+
+                        </td>
+                        <td>
+
+
+
+                            <a href="/servlet/schema.moment.Momentschema?id=7600" onclick="return !lankopen(this,'mtschema_7600',700,800);"><img src="/bilder/ikoner/16/date-time.png" class="ikon16" height="16" width="16" title="Schema" alt="Schema" /></a>
+                        </td>
+                        <td>
+
+
+
+
+                                <a href="/anstalld/moment/deltagarlista.jspa?momenttillfID=7600" onclick="return !lankopen(this,'deltagarWindow7600',680,550);"><img src="/bilder/ikoner/16/users.png" class="ikon16" height="16" width="16" title="Deltagarlista" alt="Deltagarlista" /></a>
+
+                        </td>
+                        <td>Systemintegration av IT-baserade aff&auml;rssystem</td>
+                        <td>7,5</td>
+                        <td>
+
+                            VT2026
+                        </td>
+                        <td>
+                            2026-01-19 -- 2026-03-22
+                        </td>
+                        <td>
+
+                            SYSTINT
+                        </td>
+                    </tr>
+
+
+                    <tr class="even">
+                        <td>
+
+
+
+
+
+
+
+
+<a href="/servlet/momentinfo.Momentinfo?id=7601" onclick="return !lankopen(this, 'momenttillfinfo7601', 640, 450)">
+    <img src="/bilder/ikoner/16/information.png" class="ikon16" height="16" width="16" title="Kurs-/delkursinformation" alt="Kurs-/delkursinformation" />
+</a>
+
+
+                        </td>
+                        <td>
+
+
+
+                            <a href="/servlet/schema.moment.Momentschema?id=7601" onclick="return !lankopen(this,'mtschema_7601',700,800);"><img src="/bilder/ikoner/16/date-time.png" class="ikon16" height="16" width="16" title="Schema" alt="Schema" /></a>
+                        </td>
+                        <td>
+
+
+
+
+                                <a href="/anstalld/moment/deltagarlista.jspa?momenttillfID=7601" onclick="return !lankopen(this,'deltagarWindow7601',680,550);"><img src="/bilder/ikoner/16/users.png" class="ikon16" height="16" width="16" title="Deltagarlista" alt="Deltagarlista" /></a>
+
+                        </td>
+                        <td>Beslutsst&ouml;d med aff&auml;rssystem</td>
+                        <td>7,5</td>
+                        <td>
+
+                            VT2026
+                        </td>
+                        <td>
+                            2026-01-19 -- 2026-03-22
+                        </td>
+                        <td>
+
+                            BIDIS
+                        </td>
+                    </tr>
+
+
+                    <tr class="odd">
+                        <td>
+
+
+
+
+
+
+
+
+<a href="/servlet/momentinfo.Momentinfo?id=7604" onclick="return !lankopen(this, 'momenttillfinfo7604', 640, 450)">
+    <img src="/bilder/ikoner/16/information.png" class="ikon16" height="16" width="16" title="Kurs-/delkursinformation" alt="Kurs-/delkursinformation" />
+</a>
+
+
+                        </td>
+                        <td>
+
+
+
+                            <a href="/servlet/schema.moment.Momentschema?id=7604" onclick="return !lankopen(this,'mtschema_7604',700,800);"><img src="/bilder/ikoner/16/date-time.png" class="ikon16" height="16" width="16" title="Schema" alt="Schema" /></a>
+                        </td>
+                        <td>
+
+
+
+
+                                <a href="/anstalld/moment/deltagarlista.jspa?momenttillfID=7604" onclick="return !lankopen(this,'deltagarWindow7604',680,550);"><img src="/bilder/ikoner/16/users.png" class="ikon16" height="16" width="16" title="Deltagarlista" alt="Deltagarlista" /></a>
+
+                        </td>
+                        <td>Speldesign</td>
+                        <td>7,5</td>
+                        <td>
+
+                            VT2026
+                        </td>
+                        <td>
+                            2026-01-19 -- 2026-03-22
+                        </td>
+                        <td>
+
+                            SPD
+                        </td>
+                    </tr>
+
+
+                    <tr class="even">
+                        <td>
+
+
+
+
+
+
+
+
+<a href="/servlet/momentinfo.Momentinfo?id=7605" onclick="return !lankopen(this, 'momenttillfinfo7605', 640, 450)">
+    <img src="/bilder/ikoner/16/information.png" class="ikon16" height="16" width="16" title="Kurs-/delkursinformation" alt="Kurs-/delkursinformation" />
+</a>
+
+
+                        </td>
+                        <td>
+
+
+
+                            <a href="/servlet/schema.moment.Momentschema?id=7605" onclick="return !lankopen(this,'mtschema_7605',700,800);"><img src="/bilder/ikoner/16/date-time.png" class="ikon16" height="16" width="16" title="Schema" alt="Schema" /></a>
+                        </td>
+                        <td>
+
+
+
+
+                                <a href="/anstalld/moment/deltagarlista.jspa?momenttillfID=7605" onclick="return !lankopen(this,'deltagarWindow7605',680,550);"><img src="/bilder/ikoner/16/users.png" class="ikon16" height="16" width="16" title="Deltagarlista" alt="Deltagarlista" /></a>
+
+                        </td>
+                        <td>Spelbaserat l&auml;rande</td>
+                        <td>7,5</td>
+                        <td>
+
+                            VT2026
+                        </td>
+                        <td>
+                            2026-01-19 -- 2026-03-22
+                        </td>
+                        <td>
+
+                            SL
+                        </td>
+                    </tr>
+
+
+                    <tr class="odd">
+                        <td>
+
+
+
+
+
+
+
+
+<a href="/servlet/momentinfo.Momentinfo?id=7615" onclick="return !lankopen(this, 'momenttillfinfo7615', 640, 450)">
+    <img src="/bilder/ikoner/16/information.png" class="ikon16" height="16" width="16" title="Kurs-/delkursinformation" alt="Kurs-/delkursinformation" />
+</a>
+
+
+                        </td>
+                        <td>
+
+
+
+                            <a href="/servlet/schema.moment.Momentschema?id=7615" onclick="return !lankopen(this,'mtschema_7615',700,800);"><img src="/bilder/ikoner/16/date-time.png" class="ikon16" height="16" width="16" title="Schema" alt="Schema" /></a>
+                        </td>
+                        <td>
+
+
+
+
+                                <a href="/anstalld/moment/deltagarlista.jspa?momenttillfID=7615" onclick="return !lankopen(this,'deltagarWindow7615',680,550);"><img src="/bilder/ikoner/16/users.png" class="ikon16" height="16" width="16" title="Deltagarlista" alt="Deltagarlista" /></a>
+
+                        </td>
+                        <td>Data Mining</td>
+                        <td>7,5</td>
+                        <td>
+
+                            VT2026
+                        </td>
+                        <td>
+                            2026-01-19 -- 2026-03-22
+                        </td>
+                        <td>
+
+                            DATM
+                        </td>
+                    </tr>
+
+
+                    <tr class="even">
+                        <td>
+
+
+
+
+
+
+
+
+<a href="/servlet/momentinfo.Momentinfo?id=7616" onclick="return !lankopen(this, 'momenttillfinfo7616', 640, 450)">
+    <img src="/bilder/ikoner/16/information.png" class="ikon16" height="16" width="16" title="Kurs-/delkursinformation" alt="Kurs-/delkursinformation" />
+</a>
+
+
+                        </td>
+                        <td>
+
+
+
+                            <a href="/servlet/schema.moment.Momentschema?id=7616" onclick="return !lankopen(this,'mtschema_7616',700,800);"><img src="/bilder/ikoner/16/date-time.png" class="ikon16" height="16" width="16" title="Schema" alt="Schema" /></a>
+                        </td>
+                        <td>
+
+
+
+
+                                <a href="/anstalld/moment/deltagarlista.jspa?momenttillfID=7616" onclick="return !lankopen(this,'deltagarWindow7616',680,550);"><img src="/bilder/ikoner/16/users.png" class="ikon16" height="16" width="16" title="Deltagarlista" alt="Deltagarlista" /></a>
+
+                        </td>
+                        <td>Projektledning inom IT-konsultverksamhet</td>
+                        <td>7,5</td>
+                        <td>
+
+                            VT2026
+                        </td>
+                        <td>
+                            2026-01-19 -- 2026-03-22
+                        </td>
+                        <td>
+
+                            PROMIC
+                        </td>
+                    </tr>
+
+
+                    <tr class="odd">
+                        <td>
+
+
+
+
+
+
+
+
+<a href="/servlet/momentinfo.Momentinfo?id=7618" onclick="return !lankopen(this, 'momenttillfinfo7618', 640, 450)">
+    <img src="/bilder/ikoner/16/information.png" class="ikon16" height="16" width="16" title="Kurs-/delkursinformation" alt="Kurs-/delkursinformation" />
+</a>
+
+
+                        </td>
+                        <td>
+
+
+
+                            <a href="/servlet/schema.moment.Momentschema?id=7618" onclick="return !lankopen(this,'mtschema_7618',700,800);"><img src="/bilder/ikoner/16/date-time.png" class="ikon16" height="16" width="16" title="Schema" alt="Schema" /></a>
+                        </td>
+                        <td>
+
+
+
+
+                                <a href="/anstalld/moment/deltagarlista.jspa?momenttillfID=7618" onclick="return !lankopen(this,'deltagarWindow7618',680,550);"><img src="/bilder/ikoner/16/users.png" class="ikon16" height="16" width="16" title="Deltagarlista" alt="Deltagarlista" /></a>
+
+                        </td>
+                        <td>Praktisk projektledning</td>
+                        <td>7,5</td>
+                        <td>
+
+                            VT2026
+                        </td>
+                        <td>
+                            2026-01-19 -- 2026-03-22
+                        </td>
+                        <td>
+
+                            PROLED (AB)
+                        </td>
+                    </tr>
+
+
+                    <tr class="even">
+                        <td>
+
+
+
+
+
+
+
+
+<a href="/servlet/momentinfo.Momentinfo?id=7622" onclick="return !lankopen(this, 'momenttillfinfo7622', 640, 450)">
+    <img src="/bilder/ikoner/16/information.png" class="ikon16" height="16" width="16" title="Kurs-/delkursinformation" alt="Kurs-/delkursinformation" />
+</a>
+
+
+                        </td>
+                        <td>
+
+
+
+                            <a href="/servlet/schema.moment.Momentschema?id=7622" onclick="return !lankopen(this,'mtschema_7622',700,800);"><img src="/bilder/ikoner/16/date-time.png" class="ikon16" height="16" width="16" title="Schema" alt="Schema" /></a>
+                        </td>
+                        <td>
+
+
+
+
+                                <a href="/anstalld/moment/deltagarlista.jspa?momenttillfID=7622" onclick="return !lankopen(this,'deltagarWindow7622',680,550);"><img src="/bilder/ikoner/16/users.png" class="ikon16" height="16" width="16" title="Deltagarlista" alt="Deltagarlista" /></a>
+
+                        </td>
+                        <td>Projektledningsmetoder och teori</td>
+                        <td>7,5</td>
+                        <td>
+
+                            VT2026
+                        </td>
+                        <td>
+                            2026-01-19 -- 2026-03-22
+                        </td>
+                        <td>
+
+                            PMT
+                        </td>
+                    </tr>
+
+
+                    <tr class="odd">
+                        <td>
+
+
+
+
+
+
+
+
+<a href="/servlet/momentinfo.Momentinfo?id=7623" onclick="return !lankopen(this, 'momenttillfinfo7623', 640, 450)">
+    <img src="/bilder/ikoner/16/information.png" class="ikon16" height="16" width="16" title="Kurs-/delkursinformation" alt="Kurs-/delkursinformation" />
+</a>
+
+
+                        </td>
+                        <td>
+
+
+
+                            <a href="/servlet/schema.moment.Momentschema?id=7623" onclick="return !lankopen(this,'mtschema_7623',700,800);"><img src="/bilder/ikoner/16/date-time.png" class="ikon16" height="16" width="16" title="Schema" alt="Schema" /></a>
+                        </td>
+                        <td>
+
+
+
+
+                                <a href="/anstalld/moment/deltagarlista.jspa?momenttillfID=7623" onclick="return !lankopen(this,'deltagarWindow7623',680,550);"><img src="/bilder/ikoner/16/users.png" class="ikon16" height="16" width="16" title="Deltagarlista" alt="Deltagarlista" /></a>
+
+                        </td>
+                        <td>Parallell och distribuerad programmering</td>
+                        <td>7,5</td>
+                        <td>
+
+                            VT2026
+                        </td>
+                        <td>
+                            2026-01-19 -- 2026-03-22
+                        </td>
+                        <td>
+
+                            PARADIS
+                        </td>
+                    </tr>
+
+
+                    <tr class="even">
+                        <td>
+
+
+
+
+
+
+
+
+<a href="/servlet/momentinfo.Momentinfo?id=7625" onclick="return !lankopen(this, 'momenttillfinfo7625', 640, 450)">
+    <img src="/bilder/ikoner/16/information.png" class="ikon16" height="16" width="16" title="Kurs-/delkursinformation" alt="Kurs-/delkursinformation" />
+</a>
+
+
+                        </td>
+                        <td>
+
+
+
+                            <a href="/servlet/schema.moment.Momentschema?id=7625" onclick="return !lankopen(this,'mtschema_7625',700,800);"><img src="/bilder/ikoner/16/date-time.png" class="ikon16" height="16" width="16" title="Schema" alt="Schema" /></a>
+                        </td>
+                        <td>
+
+
+
+
+                                <a href="/anstalld/moment/deltagarlista.jspa?momenttillfID=7625" onclick="return !lankopen(this,'deltagarWindow7625',680,550);"><img src="/bilder/ikoner/16/users.png" class="ikon16" height="16" width="16" title="Deltagarlista" alt="Deltagarlista" /></a>
+
+                        </td>
+                        <td>Naturlig spr&aring;kbehandling - NLP</td>
+                        <td>7,5</td>
+                        <td>
+
+                            VT2026
+                        </td>
+                        <td>
+                            2026-01-19 -- 2026-03-22
+                        </td>
+                        <td>
+
+                            NLP
+                        </td>
+                    </tr>
+
+            </table>
+
+
+
+
+</div>
+</body>
+</html>
