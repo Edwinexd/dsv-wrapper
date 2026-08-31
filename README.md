@@ -130,6 +130,12 @@ with DaisyClient() as daisy:
 
 `CourseStaff.get_person_id(client)` is cached: it returns the parsed `person_id` from the page immediately, falls back to a Daisy student search by full first+last name (with a second attempt using `first_token / remaining_tokens` for multi-word surnames like *Fathi Tachinabadi*), and raises `AmbiguousMatchError` on 0 or >1 hits. `Student.get_username(client)` and `Staff.get_usernames(client)` follow the same lazy-cache-or-throw pattern.
 
+For calendar synchronization, use `daisy.get_course_schedule_ical(momenttillf_id)` (or
+`await async_daisy.get_course_schedule_ical(...)`). It fetches Daisy's authenticated RFC 5545
+feed, including stable event `UID` values, `LAST-MODIFIED`, and the `Europe/Stockholm` timezone.
+Use `UID` as the external key in Minerva, update events from each fresh snapshot, and remove
+previously imported UIDs that disappear from the snapshot.
+
 #### Handledning Client
 
 ```python

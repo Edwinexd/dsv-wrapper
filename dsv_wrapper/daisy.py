@@ -586,6 +586,41 @@ class DaisyClient:
         response.raise_for_status()
         return daisy_parsers.parse_course_detail(response.text, mid, self.base_url)
 
+    def get_course_schedule_ical(
+        self, momenttillf_id: str | int, *, language: str = "sv"
+    ) -> str:
+        """Fetch a course offering's authenticated iCalendar schedule.
+
+        The returned RFC 5545 document is suitable for calendar synchronization.
+        In particular, Daisy supplies stable ``UID`` values and ``LAST-MODIFIED``
+        timestamps that consumers should use for idempotent upserts. Events removed
+        from a later snapshot can be treated as deletions by the consumer.
+
+        Args:
+            momenttillf_id: Daisy course-offering id.
+            language: Calendar language (``"sv"`` or ``"en"``).
+
+        Returns:
+            The complete iCalendar document as text.
+
+        Raises:
+            ValueError: If ``language`` is unsupported.
+            ParseError: If Daisy does not return an iCalendar document.
+        """
+        self._ensure_authenticated()
+        if language not in {"sv", "en"}:
+            raise ValueError("language must be 'sv' or 'en'")
+        response = self._client.get(
+            f"{self.base_url}/servlet/schema.CourseSegmentInstanceCalendarICS",
+            params={"id": str(momenttillf_id), "daisy__lang": language},
+            timeout=15,
+        )
+        response.raise_for_status()
+        calendar = response.text.lstrip("\ufeff\r\n ")
+        if not calendar.startswith("BEGIN:VCALENDAR") or "END:VCALENDAR" not in calendar:
+            raise ParseError("Daisy did not return a valid iCalendar course schedule")
+        return calendar
+
     def get_course_participants(self, momenttillf_id: str | int) -> list[CourseStaff]:
         """Fetch the role-grouped staff/participants list for a course offering.
 
@@ -1056,6 +1091,28 @@ class AsyncDaisyClient:
         response = await self._client.get(url, timeout=15)
         response.raise_for_status()
         return daisy_parsers.parse_course_detail(response.text, mid, self.base_url)
+
+    async def get_course_schedule_ical(
+        self, momenttillf_id: str | int, *, language: str = "sv"
+    ) -> str:
+        """Fetch a course offering's authenticated iCalendar schedule.
+
+        See :meth:`DaisyClient.get_course_schedule_ical` for synchronization
+        semantics.
+        """
+        await self._ensure_authenticated()
+        if language not in {"sv", "en"}:
+            raise ValueError("language must be 'sv' or 'en'")
+        response = await self._client.get(
+            f"{self.base_url}/servlet/schema.CourseSegmentInstanceCalendarICS",
+            params={"id": str(momenttillf_id), "daisy__lang": language},
+            timeout=15,
+        )
+        response.raise_for_status()
+        calendar = response.text.lstrip("\ufeff\r\n ")
+        if not calendar.startswith("BEGIN:VCALENDAR") or "END:VCALENDAR" not in calendar:
+            raise ParseError("Daisy did not return a valid iCalendar course schedule")
+        return calendar
 
     async def get_course_participants(self, momenttillf_id: str | int) -> list[CourseStaff]:
         """Fetch the role-grouped staff list for a course offering.

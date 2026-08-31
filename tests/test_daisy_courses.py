@@ -8,6 +8,7 @@ import logging
 from datetime import date
 from pathlib import Path
 
+import httpx
 import pytest
 
 from dsv_wrapper import (
@@ -16,6 +17,7 @@ from dsv_wrapper import (
     CourseStaff,
     DaisyClient,
     DaisyCourse,
+    ParseError,
     Semester,
     TermSeason,
 )
@@ -240,8 +242,85 @@ class TestParseStaffDetailsRich:
 def test_new_methods_on_both_clients():
     """Both sync and async clients expose the new course methods."""
     for cls in (DaisyClient, AsyncDaisyClient):
-        for method in ("get_courses", "get_course", "get_course_participants"):
+        for method in (
+            "get_courses",
+            "get_course",
+            "get_course_schedule_ical",
+            "get_course_participants",
+        ):
             assert hasattr(cls, method), f"{cls.__name__} missing {method}"
+
+
+ICAL = """BEGIN:VCALENDAR\r
+VERSION:2.0\r
+BEGIN:VEVENT\r
+UID:DAISY_schematillf_825062\r
+LAST-MODIFIED:20260831T153138\r
+DTSTART;TZID=Europe/Stockholm:20260323T130000\r
+DTEND;TZID=Europe/Stockholm:20260323T144500\r
+SUMMARY:Föreläsning 1 Aula NOD - PROG2\r
+END:VEVENT\r
+END:VCALENDAR\r
+"""
+
+
+def test_get_course_schedule_ical_uses_authenticated_client():
+    request_seen = None
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        nonlocal request_seen
+        request_seen = request
+        return httpx.Response(200, text=ICAL)
+
+    client = DaisyClient(username="test", password="test")
+    client._authenticated = True
+    client._client.close()
+    client._client = httpx.Client(transport=httpx.MockTransport(handle))
+    try:
+        calendar = client.get_course_schedule_ical(7620, language="en")
+    finally:
+        client._client.close()
+
+    assert "UID:DAISY_schematillf_825062" in calendar
+    assert request_seen is not None
+    assert request_seen.url.path.endswith("/schema.CourseSegmentInstanceCalendarICS")
+    assert dict(request_seen.url.params) == {"id": "7620", "daisy__lang": "en"}
+
+
+def test_get_course_schedule_ical_rejects_non_calendar_response():
+    client = DaisyClient(username="test", password="test")
+    client._authenticated = True
+    client._client.close()
+    client._client = httpx.Client(
+        transport=httpx.MockTransport(lambda _request: httpx.Response(200, text="login page"))
+    )
+    try:
+        with pytest.raises(ParseError, match="iCalendar"):
+            client.get_course_schedule_ical(7620)
+    finally:
+        client._client.close()
+
+
+@pytest.mark.asyncio
+async def test_async_get_course_schedule_ical():
+    request_seen = None
+
+    async def handle(request: httpx.Request) -> httpx.Response:
+        nonlocal request_seen
+        request_seen = request
+        return httpx.Response(200, text=ICAL)
+
+    client = AsyncDaisyClient(username="test", password="test")
+    client._authenticated = True
+    client._client = httpx.AsyncClient(transport=httpx.MockTransport(handle))
+    try:
+        calendar = await client.get_course_schedule_ical("7620")
+    finally:
+        await client._client.aclose()
+
+    assert calendar.startswith("BEGIN:VCALENDAR")
+    assert request_seen is not None
+    assert request_seen.url.params["id"] == "7620"
 
 
 # ---------------------------------------------------------------------------
