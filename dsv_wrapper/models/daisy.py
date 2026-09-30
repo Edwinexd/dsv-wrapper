@@ -463,18 +463,38 @@ class Semester(BaseModel):
         return cls(year=year, season=season)
 
 
+class SyllabusCourse(BaseModel):
+    """A syllabus-level course that a course offering is part of.
+
+    Listed in the *Kurser* / *Courses* section of the momentinfo page.
+    """
+
+    name: str = Field(description="Course name (in the page's language)")
+    code: str = Field(description="Course code (e.g. 'IB130N')")
+    requirement: str | None = Field(
+        default=None, description="Bracketed status, e.g. 'obligatorisk' / 'compulsory'"
+    )
+    level: str | None = Field(default=None, description="E.g. 'Grundnivå' / 'First cycle'")
+    syllabus_url: str | None = Field(
+        default=None, description="External syllabus URL (utbildning.su.se planarkiv)"
+    )
+
+    model_config = {"frozen": True}
+
+
 class DaisyCourse(BaseModel):
     """A course offering ("moment"/"delkurs" instance) in Daisy.
 
     Represents a specific delivery of a course in a particular semester.
     Fields with ``None`` typically mean the data was not present on the page
     used to construct the model — call :meth:`DaisyClient.get_course` to
-    fetch the full detail page.
+    fetch the full detail page. Text fields from the detail page are in the
+    language the page was fetched in (Swedish or English).
     """
 
     momenttillf_id: str = Field(description="Daisy momenttillfID (e.g. '7620')")
     beteckning: str = Field(description="Course code/designation (e.g. 'PROG2')")
-    name: str = Field(description="Course name in Swedish")
+    name: str = Field(description="Course name")
     ects: float | None = Field(default=None, description="Credits (högskolepoäng)")
     semester: Semester | None = None
     start_date: date | None = None
@@ -486,7 +506,33 @@ class DaisyCourse(BaseModel):
         default=None,
         description="External syllabus URL (utbildning.su.se planarkiv) — only from detail page",
     )
-    unit: str | None = Field(default=None, description="Owning unit, e.g. 'ACT' — only from detail")
+    unit: str | None = Field(
+        default=None,
+        description="Owning unit, e.g. 'ACT Agera i kommunikation med teknik' — only from detail",
+    )
+
+    # The fields below are only populated from the detail page.
+    level: str | None = Field(default=None, description="E.g. 'Grundnivå' / 'First cycle'")
+    language: str | None = Field(default=None, description="Language of instruction")
+    prerequisites: str | None = None
+    website: str | None = Field(default=None, description="Course web page, if listed")
+    course_analysis_url: str | None = Field(
+        default=None, description="Latest published course analysis (PDF)"
+    )
+    course_analysis_semester: Semester | None = Field(
+        default=None, description="Semester the course analysis is about"
+    )
+    last_updated: date | None = Field(default=None, description="'Senast uppdaterad' date")
+    aim: str | None = Field(default=None, description="'Mål' section text")
+    content: str | None = Field(default=None, description="'Innehåll' section text")
+    instruction: str | None = Field(
+        default=None, description="'Undervisning/Genomförande' section text"
+    )
+    examination: str | None = Field(default=None, description="'Examination' section text")
+    literature: list[str] = Field(default_factory=list)
+    courses: list[SyllabusCourse] = Field(
+        default_factory=list, description="Syllabus courses this offering is part of"
+    )
 
     model_config = {"frozen": True}
 

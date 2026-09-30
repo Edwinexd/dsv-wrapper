@@ -19,6 +19,7 @@ from ..models import (
     Semester,
     Staff,
     Student,
+    SyllabusCourse,
 )
 from ..utils import extract_text, parse_html, parse_time
 
@@ -173,7 +174,7 @@ def parse_students(html: str, base_url: str) -> list[Student]:
                 m = _PERSON_ID_RE.search(href)
                 if m:
                     person_id = m.group(1)
-                    profile_url = href if href.startswith("http") else f"{base_url}{href}"
+                    profile_url = _abs_url(href, base_url)
 
             last_cell = _cell(cells, "Efternamn")
             first_cell = _cell(cells, "Förnamn")
@@ -538,7 +539,8 @@ def parse_staff_details(person_id: str, html: str, base_url: str) -> Staff:
 # Course (moment) search and detail parsers
 # ---------------------------------------------------------------------------
 
-_DATE_RANGE_RE = re.compile(r"(\d{4}-\d{2}-\d{2})\s*--\s*(\d{4}-\d{2}-\d{2})")
+_DATE_RANGE_RE = re.compile(r"(\d{4}-\d{2}-\d{2})\s*(?:--|till|to)\s*(\d{4}-\d{2}-\d{2})")
+_ISO_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 _TERM_RE = re.compile(r"^([VH]T)(\d{4})$")
 _RESULT_RANGE_RE = re.compile(r"Resultat\s+(\d+)\s+till\s+(\d+)\s+av\s+(\d+)")
 _ECTS_RE = re.compile(r"([\d,.]+)")
@@ -561,7 +563,7 @@ def _parse_ects(text: str) -> float | None:
 
 
 def _parse_date_range(text: str) -> tuple[date | None, date | None]:
-    """Parse a ``YYYY-MM-DD -- YYYY-MM-DD`` cell."""
+    """Parse a ``YYYY-MM-DD -- YYYY-MM-DD`` (or ``till``/``to``) date range."""
     m = _DATE_RANGE_RE.search(text)
     if not m:
         return None, None
@@ -642,13 +644,6 @@ def parse_course_search(
         start_date, end_date = _parse_date_range(cells[6].get_text(" ", strip=True))
         beteckning = _collapse_ws(cells[7].get_text(" ", strip=True))
 
-        def _abs(href: str | None) -> str | None:
-            if not href:
-                return None
-            if href.startswith("http"):
-                return href
-            return f"{base_url}{href}"
-
         courses.append(
             DaisyCourse(
                 momenttillf_id=momenttillf_id,
@@ -658,21 +653,176 @@ def parse_course_search(
                 semester=semester,
                 start_date=start_date,
                 end_date=end_date,
-                info_url=_abs(info_href),
-                schedule_url=_abs(schedule_link.get("href") if schedule_link else None),
-                participants_url=_abs(participants_link.get("href") if participants_link else None),
+                info_url=_abs_url(info_href, base_url),
+                schedule_url=_abs_url(
+                    schedule_link.get("href") if schedule_link else None, base_url
+                ),
+                participants_url=_abs_url(
+                    participants_link.get("href") if participants_link else None, base_url
+                ),
             )
         )
 
     return courses, range_from, range_to, total
 
 
+# Momentinfo labels and section headings, in Swedish and English (the page is
+# served in either depending on ``locale=sv|en``), mapped to language-neutral keys.
+_MOMENTINFO_LABELS = {
+    "namn": "name",
+    "name": "name",
+    "enhet": "unit",
+    "unit": "unit",
+    "poäng": "ects",
+    "credits": "ects",
+    "nivå": "level",
+    "level": "level",
+    "datum": "dates",
+    "date": "dates",
+    "undervisningsspråk": "language",
+    "language of instruction": "language",
+    "förkunskapskrav": "prerequisites",
+    "prerequisites": "prerequisites",
+    "webbsida": "website",
+    "web page": "website",
+    "kursanalys": "course_analysis",
+    "course analysis": "course_analysis",
+}
+_MOMENTINFO_SECTIONS = {
+    "mål": "aim",
+    "aim": "aim",
+    "innehåll": "content",
+    "content": "content",
+    "undervisning/genomförande": "instruction",
+    "instruction": "instruction",
+    "examination": "examination",
+    "litteratur": "literature",
+    "literature": "literature",
+    "medverkande": "participants",
+    "contributors": "participants",
+    "kurser": "courses",
+    "courses": "courses",
+}
+# Sub-heading that only says the text below is quoted from the syllabus.
+_SYLLABUS_MARKERS = {"enligt kursplanen", "according to the course syllabus"}
+_LABEL_RE = re.compile(r"^(.*?)\s*(?:\((.*)\))?\s*:?$")
+_SYLLABUS_COURSE_RE = re.compile(
+    r"^(?P<name>.*),\s*(?P<code>[A-Z0-9]+)"
+    r"(?:\s*\[(?P<requirement>[^\]]*)\])?"
+    r"(?:\s*(?:Nivå|Level):\s*(?P<level>.*))?$"
+)
+
+
+def _text_with_breaks(tag) -> str:
+    """Text of ``tag`` with ``<br>``/``<p>``/``<li>`` rendered as newlines."""
+    parts: list[str] = []
+    for node in tag.descendants:
+        if isinstance(node, NavigableString):
+            parts.append(_WS_RE.sub(" ", str(node)))
+        elif node.name in ("br", "p", "li"):
+            parts.append("\n")
+    lines = [line.strip() for line in "".join(parts).split("\n")]
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
+
+
+def _abs_url(href: str | None, base_url: str) -> str | None:
+    """Resolve a site-relative ``href`` against ``base_url``."""
+    if not href:
+        return None
+    return href if href.startswith("http") else f"{base_url}{href}"
+
+
+def _momentinfo_header(soup) -> dict[str, tuple[str | None, str, str | None]]:
+    """Parse the ``<b>Label: </b>value<br>`` block at the top of a momentinfo page.
+
+    Returns ``{key: (label_qualifier, text, href)}`` where ``label_qualifier``
+    is the parenthesised part of the label (e.g. ``HT2025`` in
+    ``Kursanalys (HT2025)``) and ``href`` the first link in the value.
+    """
+    fields: dict[str, tuple[str | None, str, str | None]] = {}
+    block = soup.find("div", class_="brodtext")
+    if block is None:
+        return fields
+    key: str | None = None
+    qualifier: str | None = None
+    text: list[str] = []
+    href: str | None = None
+
+    def _flush() -> None:
+        if key is not None:
+            fields[key] = (qualifier, _collapse_ws(" ".join(text)), href)
+
+    for node in block.children:
+        if getattr(node, "name", None) == "b":
+            _flush()
+            m = _LABEL_RE.match(_collapse_ws(node.get_text(" ", strip=True)))
+            key = _MOMENTINFO_LABELS.get(m.group(1).lower())
+            qualifier, text, href = m.group(2), [], None
+        elif isinstance(node, NavigableString):
+            text.append(str(node))
+        elif node.name == "a":
+            text.append(node.get_text(" ", strip=True))
+            href = href or node.get("href")
+    _flush()
+    return fields
+
+
+def _momentinfo_sections(soup) -> dict[str, list]:
+    """Map each known momentinfo section to the ``<td>`` cells of its rows.
+
+    Sections are delimited by ``tabellRubrikLjus`` heading rows (*Mål*,
+    *Medverkande*, *Kurser*, … or their English counterparts).
+    """
+    sections: dict[str, list] = {}
+    current: list | None = None
+    for tr in soup.find_all("tr"):
+        td = tr.find("td")
+        if td is None:
+            continue
+        if "tabellRubrikLjus" in (td.get("class") or []):
+            key = _MOMENTINFO_SECTIONS.get(_collapse_ws(td.get_text(" ", strip=True)).lower())
+            current = sections.setdefault(key, []) if key else None
+        elif current is not None:
+            current.append(td)
+    return sections
+
+
+def _section_text(cells: list) -> str | None:
+    """Join a section's rows into text, keeping sub-headings such as *Precisering*."""
+    blocks = [_text_with_breaks(td) for td in cells]
+    return "\n\n".join(b for b in blocks if b and b.lower() not in _SYLLABUS_MARKERS) or None
+
+
+def _parse_syllabus_courses(cells: list) -> list[SyllabusCourse]:
+    """Parse the *Kurser* section: one ``Name, CODE [status] Nivå: X <a>`` per line."""
+    courses: list[SyllabusCourse] = []
+    for td in cells:
+        text: list[str] = []
+        href: str | None = None
+        for node in [*td.descendants, None]:
+            if isinstance(node, NavigableString):
+                text.append(str(node))
+            elif node is not None and node.name == "a":
+                href = node.get("href")
+            if node is None or node.name == "br":
+                line = _collapse_ws(" ".join(text))
+                if line:
+                    m = _SYLLABUS_COURSE_RE.match(line)
+                    if not m:
+                        raise ParseError(f"Unrecognised course line on momentinfo page: {line!r}")
+                    courses.append(SyllabusCourse(syllabus_url=href, **m.groupdict()))
+                text, href = [], None
+    return courses
+
+
 def parse_course_detail(html: str, momenttillf_id: str, base_url: str) -> DaisyCourse:
     """Parse the public ``/servlet/momentinfo.Momentinfo?id=…`` page.
 
-    The page title encodes ``BETECKNING SEMESTER - Course name``. The body
-    contains a "Namn / Enhet / Poäng" line and an external syllabus link in
-    the "Kurser" section.
+    Works on both the Swedish and the English version of the page. The page
+    title encodes ``BETECKNING SEMESTER - Course name``; the body has a
+    labelled header block (name, unit, credits, level, dates, …) followed by
+    free-text sections (aim, content, instruction, examination), a literature
+    list, the participants and the syllabus courses.
     """
     soup = parse_html(html)
 
@@ -680,10 +830,8 @@ def parse_course_detail(html: str, momenttillf_id: str, base_url: str) -> DaisyC
     raw_title = soup.title.get_text(strip=True) if soup.title else ""
     title = raw_title.split("»", 1)[-1].strip()
     beteckning: str = ""
-    name: str = ""
     semester: Semester | None = None
     head, _, tail = title.partition(" - ")
-    name = _collapse_ws(tail) if tail else ""
     if head:
         parts = head.split()
         if len(parts) >= 2 and _TERM_RE.match(parts[-1]):
@@ -692,45 +840,60 @@ def parse_course_detail(html: str, momenttillf_id: str, base_url: str) -> DaisyC
         else:
             beteckning = head
 
-    ects: float | None = None
-    unit: str | None = None
-    syllabus_url: str | None = None
+    header = _momentinfo_header(soup)
+    if "name" not in header:
+        raise ParseError(f"No course information found on momentinfo page {momenttillf_id}")
 
-    # The "Namn: ... Enhet: ... Poäng: 7,5 hp" line lives in a single <td>.
-    for td in soup.find_all("td"):
-        text = td.get_text(" ", strip=True)
-        if "Poäng:" in text and "Enhet:" in text:
-            m_poang = re.search(r"Poäng:\s*([\d,.]+)\s*hp", text)
-            if m_poang:
-                ects = _parse_ects(m_poang.group(1))
-            m_enhet = re.search(r"Enhet:\s*([^\s]+)", text)
-            if m_enhet:
-                unit = m_enhet.group(1)
-            # Also recover the name if we didn't have it.
-            if not name:
-                m_name = re.search(r"Namn:\s*(.*?)\s+Enhet:", text)
-                if m_name:
-                    name = _collapse_ws(m_name.group(1))
-            break
+    def _field(key: str) -> str | None:
+        return header[key][1] or None if key in header else None
 
-    # Find external syllabus link (planarkiv)
-    for a in soup.find_all("a", href=True):
-        href = a["href"]
-        if "planarkiv" in href and "utbildning.su.se" in href:
-            syllabus_url = href
-            break
+    start_date = end_date = None
+    dates = _field("dates")
+    if dates:
+        start_date, end_date = _parse_date_range(dates)
+        if start_date is None:
+            raise ParseError(f"Unrecognised course dates on momentinfo page: {dates!r}")
+
+    analysis_semester, _, analysis_href = header.get("course_analysis", (None, "", None))
+
+    updated_td = soup.find("td", class_="litentabellRubrikLjus")
+    m_updated = _ISO_DATE_RE.search(updated_td.get_text()) if updated_td else None
+
+    sections = _momentinfo_sections(soup)
+    courses = _parse_syllabus_courses(sections.get("courses", []))
 
     return DaisyCourse(
         momenttillf_id=momenttillf_id,
-        beteckning=beteckning or "",
-        name=name or "",
-        ects=ects,
+        beteckning=beteckning,
+        name=_collapse_ws(tail) or _field("name") or "",
+        ects=_parse_ects(_field("ects") or ""),
         semester=semester,
+        start_date=start_date,
+        end_date=end_date,
         info_url=f"{base_url}/servlet/momentinfo.Momentinfo?id={momenttillf_id}",
         schedule_url=f"{base_url}/servlet/schema.moment.Momentschema?id={momenttillf_id}",
         participants_url=f"{base_url}/anstalld/moment/momentNav.jspa?momenttillfID={momenttillf_id}&akt=mdv",
-        syllabus_url=syllabus_url,
-        unit=unit,
+        syllabus_url=next((c.syllabus_url for c in courses if c.syllabus_url), None),
+        unit=_field("unit"),
+        level=_field("level"),
+        language=_field("language"),
+        prerequisites=_field("prerequisites"),
+        website=header["website"][2] if "website" in header else None,
+        course_analysis_url=_abs_url(analysis_href, base_url),
+        course_analysis_semester=_parse_semester_cell(analysis_semester or ""),
+        last_updated=(
+            datetime.strptime(m_updated.group(0), "%Y-%m-%d").date() if m_updated else None
+        ),
+        aim=_section_text(sections.get("aim", [])),
+        content=_section_text(sections.get("content", [])),
+        instruction=_section_text(sections.get("instruction", [])),
+        examination=_section_text(sections.get("examination", [])),
+        literature=[
+            _collapse_ws(_text_with_breaks(li))
+            for td in sections.get("literature", [])
+            for li in td.find_all("li")
+        ],
+        courses=courses,
     )
 
 
@@ -753,32 +916,21 @@ def parse_course_participants(html: str, base_url: str) -> list[CourseStaff]:
     """Parse the role-grouped medverkande section from a momentinfo page.
 
     The public ``/servlet/momentinfo.Momentinfo?id=…`` page contains a row
-    headed *Medverkande* whose body is one ``<div class="brodtext">`` per role
-    group. Each group starts with ``<b>RoleName</b>`` and then ``<a>…</a>Name``
-    entries (one per person). The same person frequently appears under
-    multiple role groups; we merge them so each ``CourseStaff`` shows up
-    exactly once with all their roles.
+    headed *Medverkande* (*Contributors* in English) whose body is one
+    ``<div class="brodtext">`` per role group. Each group starts with
+    ``<b>RoleName</b>`` and then ``<a>…</a>Name`` entries (one per person).
+    The same person frequently appears under multiple role groups; we merge
+    them so each ``CourseStaff`` shows up exactly once with all their roles.
 
     Unlike ``akt=mdv``, this page is readable for any course, not just ones
     the authenticated user is teaching.
     """
     soup = parse_html(html)
 
-    # The "Medverkande" section is delimited by a tabellRubrik header row
-    # followed by a single <tr> whose <td> contains the brodtext role groups.
-    # Find that <td> first.
-    medverkande_td = None
-    for tr in soup.find_all("tr"):
-        rubrik = tr.find("td", class_=lambda c: c and "tabellRubrik" in c)
-        if rubrik and "Medverkande" in rubrik.get_text(strip=True):
-            nxt = tr.find_next_sibling("tr")
-            if nxt is not None:
-                td = nxt.find("td")
-                if td is not None:
-                    medverkande_td = td
-            break
-    if medverkande_td is None:
+    cells = _momentinfo_sections(soup).get("participants")
+    if not cells:
         return []
+    medverkande_td = cells[0]
 
     # Walk each <div class="brodtext"> and parse its role + people.
     # A person may appear linked (with personID) or as plain text (typically

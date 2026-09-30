@@ -19,6 +19,7 @@ from dsv_wrapper import (
     DaisyCourse,
     ParseError,
     Semester,
+    SyllabusCourse,
     TermSeason,
 )
 from dsv_wrapper.parsers.daisy import (
@@ -111,11 +112,115 @@ class TestParseCourseDetail:
         assert course.beteckning == "PROG2"
         assert course.name == "Programmering 2"
         assert course.ects == 7.5
-        assert course.unit == "ACT"
+        assert course.unit == "ACT Agera i kommunikation med teknik"
         assert course.semester == Semester.from_label("VT2026")
+        assert course.start_date == date(2026, 3, 23)
+        assert course.end_date == date(2026, 6, 7)
         assert course.syllabus_url == (
             "https://utbildning.su.se/utbildning/sok-i-planarkiv/planarkiv?code=IB440C"
         )
+        assert course.prerequisites.startswith("Som obligatorisk kurs: inget förkunskapskrav.")
+        assert course.website is None
+
+    def test_swedish_detail_all_fields(self):
+        course = parse_course_detail(_load("momentinfo_7689_sv.html"), "7689", BASE)
+        assert course.beteckning == "IDSV"
+        assert course.name == "Introduktion till data- och systemvetenskap"
+        assert course.semester == Semester.from_label("HT2026")
+        assert course.unit == "ACT Agera i kommunikation med teknik"
+        assert course.ects == 7.5
+        assert course.level == "Grundnivå"
+        assert course.start_date == date(2026, 8, 31)
+        assert course.end_date == date(2026, 9, 30)
+        assert course.language == "Svenska"
+        assert course.prerequisites is None
+        assert course.course_analysis_url == f"{BASE}/fil/visa?id=326360"
+        assert course.course_analysis_semester == Semester.from_label("HT2025")
+        assert course.last_updated == date(2026, 8, 26)
+        assert course.aim.startswith("Efter avklarad kurs skall studenten kunna")
+        assert "\n- datorarkitektur;\n" in course.aim
+        assert course.aim.endswith("grundläggande färdigheter i programmering.")
+        assert course.content.startswith("Kursen är en introduktion")
+        assert course.instruction == "Undervisningen består av föreläsningar och handledning."
+        assert course.examination.startswith("Kursen examineras genom tentamen")
+        assert course.literature == [
+            "J. Glenn Brookshear & Dennis Brylow. (2019). Computer Science - An Overview. "
+            "13 uppl. Pearson. ISBN: 978-0-13-487546-0"
+        ]
+        assert course.courses == [
+            SyllabusCourse(
+                name="Introduktion till data- och systemvetenskap",
+                code="IB130N",
+                requirement="obligatorisk",
+                level="Grundnivå",
+                syllabus_url=(
+                    "https://utbildning.su.se/utbildning/sok-i-planarkiv/planarkiv?code=IB130N"
+                ),
+            )
+        ]
+        assert course.syllabus_url == course.courses[0].syllabus_url
+
+    def test_english_detail_all_fields(self):
+        course = parse_course_detail(_load("momentinfo_7689_en.html"), "7689", BASE)
+        assert course.beteckning == "IDSV"
+        assert course.name == "Introduction to Computer and Systems Sciences"
+        assert course.semester == Semester.from_label("HT2026")
+        assert course.unit == "Act in Communication with Technology"
+        assert course.ects == 7.5
+        assert course.level == "First cycle"
+        assert course.start_date == date(2026, 8, 31)
+        assert course.end_date == date(2026, 9, 30)
+        assert course.language == "Swedish"
+        assert course.course_analysis_url == f"{BASE}/fil/visa?id=326360"
+        assert course.course_analysis_semester == Semester.from_label("HT2025")
+        assert course.last_updated == date(2026, 8, 26)
+        assert course.aim.startswith("Upon successful completion of the course")
+        assert course.instruction == (
+            "Instruction is given in the form of lectures and supervision sessions."
+        )
+        assert course.examination.startswith("The course is examined through")
+        assert len(course.literature) == 1
+        assert [(c.code, c.requirement, c.level) for c in course.courses] == [
+            ("IB130N", "compulsory", "First cycle")
+        ]
+
+    def test_language_independent_fields_match(self):
+        """The Swedish and English pages agree on everything that isn't prose."""
+        neutral = {
+            "momenttillf_id", "beteckning", "ects", "semester", "start_date", "end_date",
+            "info_url", "schedule_url", "participants_url", "syllabus_url",
+            "course_analysis_url", "course_analysis_semester", "last_updated", "website",
+        }  # fmt: skip
+        sv = parse_course_detail(_load("momentinfo_7689_sv.html"), "7689", BASE)
+        en = parse_course_detail(_load("momentinfo_7689_en.html"), "7689", BASE)
+        assert sv.model_dump(include=neutral) == en.model_dump(include=neutral)
+
+    def test_website_and_examination_subheadings(self):
+        course = parse_course_detail(_load("momentinfo_7619_db.html"), "7619", BASE)
+        assert course.unit == "Informationssystem"
+        assert course.website == "https://nextilearn.dsv.su.se/course/view.php?id=415"
+        assert course.start_date == date(2026, 2, 19)
+        assert course.end_date == date(2026, 3, 22)
+        # The "Enligt kursplanen" marker is dropped; real sub-headings are kept.
+        assert course.examination.startswith("Kursen examineras genom tentamen")
+        assert "\n\nPrecisering\n\nExamination enligt kursplanen\n" in course.examination
+
+    def test_page_without_text_sections(self):
+        """The English PROG2 page has no aim/content/instruction/examination."""
+        course = parse_course_detail(_load("momentinfo_7620_en.html"), "7620", BASE)
+        assert course.name == "Programming 2"
+        assert course.aim is None
+        assert course.examination is None
+        assert len(course.literature) == 1
+
+    def test_non_course_page_raises(self):
+        with pytest.raises(ParseError):
+            parse_course_detail("<html><body>Logga in</body></html>", "1", BASE)
+
+    def test_malformed_dates_raise(self):
+        html = _load("momentinfo_7689_sv.html").replace("2026-08-31 till", "i höst till")
+        with pytest.raises(ParseError):
+            parse_course_detail(html, "7689", BASE)
 
 
 # ---------------------------------------------------------------------------
@@ -180,6 +285,20 @@ class TestParseCourseParticipants:
         martin = by_name["Martin Duneld"]
         assert martin.roles == ["Gästföreläsare"]
         assert martin.person_id == "589"
+
+    def test_english_participants(self):
+        """The English page uses a *Contributors* heading and translated roles."""
+        sv = parse_course_participants(_load("momentinfo_7689_sv.html"), BASE)
+        en = parse_course_participants(_load("momentinfo_7689_en.html"), BASE)
+        assert [(p.person_id, p.name) for p in en] == [(p.person_id, p.name) for p in sv]
+        assert [p.name for p in en] == [
+            "Peter Idestam-Almquist",
+            "Edwin Sundberg",
+            "Jozef Zbigniew Swiatycki",
+            "Magnus Johansson",
+        ]
+        assert en[1].roles == ["Course assistant", "Teacher", "Lecturer"]
+        assert sv[1].roles == ["Handledare", "Lektionsledare", "Föreläsare"]
 
     def test_returns_empty_list_when_section_missing(self):
         """A momentinfo page without a Medverkande section returns []."""
@@ -355,6 +474,12 @@ def test_daisy_get_course_and_participants(daisy_client):
     assert detail.beteckning == "PROG2"
     assert detail.ects == 7.5
     assert detail.unit  # DSV courses always have an owning unit
+    # The detail page carries the same period as the search result.
+    assert (detail.start_date, detail.end_date) == (prog2.start_date, prog2.end_date)
+
+    english = daisy_client.get_course(prog2.momenttillf_id, language="en")
+    assert english.name == "Programming 2"
+    assert (english.start_date, english.end_date) == (detail.start_date, detail.end_date)
 
     parts = daisy_client.get_course_participants(prog2.momenttillf_id)
     assert parts, "PROG2 has medverkande in Daisy"

@@ -126,7 +126,7 @@ with DaisyClient() as daisy:
             print(f"  {cs.name:30s} {cs.roles}  → {username}")
 ```
 
-`Semester` encodes Daisy's 5-digit `terminID` (`YYYY1`=VT, `YYYY2`=HT) and accepts `from_label("VT2026")` / `from_termin_id(20261)`. Course offerings ("moment") expose `beteckning`, `name`, `ects`, `start_date`/`end_date`, `info_url`, `schedule_url`, `participants_url`, and (after `get_course`) `syllabus_url` + `unit`.
+`Semester` encodes Daisy's 5-digit `terminID` (`YYYY1`=VT, `YYYY2`=HT) and accepts `from_label("VT2026")` / `from_termin_id(20261)`. Course offerings ("moment") expose `beteckning`, `name`, `ects`, `start_date`/`end_date`, `info_url`, `schedule_url`, `participants_url`. `get_course(momenttillf_id)` parses the full detail page and additionally fills in `unit`, `level`, `language`, `prerequisites`, `website`, `course_analysis_url`, `last_updated`, the `aim` / `content` / `instruction` / `examination` texts, `literature`, and `courses` (a list of `SyllabusCourse`, whose first link is also exposed as `syllabus_url`). Both `get_course` and `get_course_participants` accept `language="en"` to fetch the English version of the page; names, free text and role names are then in English.
 
 `CourseStaff.get_person_id(client)` is cached: it returns the parsed `person_id` from the page immediately, falls back to a Daisy student search by full first+last name (with a second attempt using `first_token / remaining_tokens` for multi-word surnames like *Fathi Tachinabadi*), and raises `AmbiguousMatchError` on 0 or >1 hits. `Student.get_username(client)` and `Staff.get_usernames(client)` follow the same lazy-cache-or-throw pattern.
 

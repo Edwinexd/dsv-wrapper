@@ -38,6 +38,7 @@ from .daisy import (
     Schedule,
     Semester,
     Staff,
+    SyllabusCourse,
     TermSeason,
 )
 
@@ -79,6 +80,7 @@ __all__ = [
     "TermSeason",
     "DaisyCourse",
     "CourseStaff",
+    "SyllabusCourse",
     "CourseResponsibility",
     # Handledning models
     "QueueStatus",

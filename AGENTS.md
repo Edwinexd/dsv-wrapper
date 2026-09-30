@@ -183,8 +183,21 @@
     `YYYY1` for VT and `YYYY2` for HT.
   - `DaisyCourse`: a course offering (`momenttillf_id`, `beteckning`, `name`,
     `ects`, `semester`, `start_date`, `end_date`, `info_url`, `schedule_url`,
-    `participants_url`, `syllabus_url`, `unit`). Search results omit
-    `syllabus_url`/`unit`; the detail page omits start/end dates.
+    `participants_url`, `syllabus_url`, `unit`). Search results only carry
+    the fields above minus `syllabus_url`/`unit`. The detail page
+    (`get_course`) has everything, **including `start_date`/`end_date`**
+    (the `Datum:` / `Date:` row), plus detail-only fields: `level`,
+    `language` (of instruction), `prerequisites`, `website`,
+    `course_analysis_url` + `course_analysis_semester`, `last_updated`,
+    the free-text sections `aim`, `content`, `instruction`, `examination`
+    (newlines preserved; the "Enligt kursplanen" marker is dropped but real
+    sub-headings such as *Precisering* are kept), `literature: list[str]`
+    and `courses: list[SyllabusCourse]`. `unit` is the full unit name
+    (e.g. "ACT Agera i kommunikation med teknik"), not just its first word.
+  - `SyllabusCourse`: a syllabus-level course the offering belongs to, from
+    the *Kurser* section (`name`, `code` e.g. `IB130N`, `requirement` e.g.
+    "obligatorisk", `level`, `syllabus_url`). `DaisyCourse.syllabus_url` is
+    the first of these.
   - `CourseStaff`: a person involved on a course (`name`, `first_name`,
     `last_name`, `person_id`, `profile_url`, `roles: list[str]`). Sourced
     from the public momentinfo page's *Medverkande* section, which groups
@@ -228,10 +241,16 @@
     `DaisyCourse`s by auto-paginating
     `POST /sok/sokmoment.jspa` (20 per page, `querypage=N` 0-indexed). Pass
     `semester` for a single term, or `semester_from`/`semester_to` for a range.
-  - `get_course(momenttillf_id)`: fetches `/servlet/momentinfo.Momentinfo?id=…`
-    and parses out `ects`, `unit`, `semester`, and the external SU syllabus URL.
-  - `get_course_participants(momenttillf_id)`: parses the public momentinfo
-    page's *Medverkande* section and returns `CourseStaff`s. Works for any
+  - `get_course(momenttillf_id, *, language="sv")`: fetches
+    `/servlet/momentinfo.Momentinfo?id=…&locale=sv|en` and parses every
+    field on the page (see `DaisyCourse` above).
+  - **Momentinfo language**: both `get_course` and `get_course_participants`
+    take `language="sv"|"en"` and always send `locale` explicitly – without
+    it Daisy picks a language itself (English when unauthenticated). Names,
+    free text and **role names** follow the page language (e.g. *Handledare*
+    ↔ *Course assistant*); ids, dates, credits and URLs are identical.
+  - `get_course_participants(momenttillf_id, *, language="sv")`: parses the
+    public momentinfo page's *Medverkande* section and returns `CourseStaff`s. Works for any
     course in Daisy, not just ones you teach (unlike the auth-gated
     `akt=mdv` tab). Same URL as `get_course` – call both if you need
     metadata + participants, or use the parsers directly to avoid the
@@ -250,8 +269,15 @@
 - **Parsing** (`dsv_wrapper/parsers/daisy.py`):
   - `parse_course_search` returns `(courses, range_from, range_to, total)` so
     callers can drive pagination if they want manual control.
-  - `parse_course_detail` extracts beteckning/term from the page `<title>` and
-    ECTS / unit from the "Namn / Enhet / Poäng" line.
+  - `parse_course_detail` extracts beteckning/term from the page `<title>`,
+    the `<b>Label: </b>value<br>` header block via `_momentinfo_header`, and
+    the `tabellRubrikLjus`-delimited sections via `_momentinfo_sections`
+    (shared with `parse_course_participants`). Swedish and English labels /
+    headings are mapped to neutral keys in `_MOMENTINFO_LABELS` /
+    `_MOMENTINFO_SECTIONS` – add new labels there. Raises `ParseError` if
+    the header block is missing, the date row is malformed, or a *Kurser*
+    line doesn't match. The "Publicerade dokument för examinationer"
+    section is not parsed.
   - `parse_course_participants` walks the role-grouped
     `<div class="brodtext">` blocks in the *Medverkande* row of the
     momentinfo page; each block starts with `<b>RoleName</b>` and contains
@@ -268,7 +294,8 @@
   - `/sok/sokmoment.jspa` (POST) — course search; fields: `institution=4` for
     DSV, `fromTerminID`/`tomTerminID` (5-digit `YYYY[12]`), `beteckning`,
     `namn`, optional `querypage` for pagination.
-  - `/servlet/momentinfo.Momentinfo?id=N` — public detail page.
+  - `/servlet/momentinfo.Momentinfo?id=N&locale=sv|en` — public detail page
+    (readable without login).
   - `/servlet/schema.moment.Momentschema?id=N` — schedule.
   - `/anstalld/moment/deltagarlista.jspa?momenttillfID=N` — student list.
   - `/anstalld/moment/momentNav.jspa?momenttillfID=N&akt={inf|mdv|sch|exa|grp|utv|upp|med}`
@@ -313,6 +340,7 @@
 - ✅ **Mail client refactored to IMAP/SMTP** (2025-11-26) - Replaced fragile OWA API with standard protocols
 - ✅ **Play client added** (new service - 2026-03-31) - DSVPlay presentations, transcripts, courses
 - ✅ **Daisy course/medverkande API** (2026-05-19) - `get_courses(semester)`, `get_course`, `get_course_participants`, extended `Staff` fields
+- ✅ **Full momentinfo parsing in Swedish and English** (2026-09-30) - `get_course` now returns start/end dates and every other field on the page; `language` option on `get_course`/`get_course_participants`
 - ✅ BaseAsyncClient removed
 - ✅ Old unified client files removed (base_unified.py, shibboleth_unified.py, actlab_unified.py)
 - ✅ requirements.txt updated (removed requests and aiohttp dependencies)
@@ -354,4 +382,4 @@
 - Mail tests now use IMAP/SMTP instead of OWA API
 - Mail send tests use `AUTOMATEDTESTSEND - {timestamp}` pattern for easy cleanup
 - Play tests include: courses, presentations listing, full presentation details, transcript, API parity
-- Daisy course tests use captured HTML fixtures in `tests/fixtures/daisy/` and exercise `Semester`, course-search pagination header, course detail title parsing, medverkande K-marker, and rich-staff parsing
+- Daisy course tests use captured HTML fixtures in `tests/fixtures/daisy/` and exercise `Semester`, course-search pagination header, course detail parsing in both Swedish and English (`momentinfo_7689_sv.html` / `_en.html`), role-grouped medverkande, and rich-staff parsing
