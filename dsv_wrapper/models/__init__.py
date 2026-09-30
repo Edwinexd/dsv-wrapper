@@ -26,6 +26,7 @@ from .daisy import (
     BookableRoom,
     BookingSlot,
     Break,
+    CourseExam,
     CourseResponsibility,
     CourseStaff,
     DaisyCourse,
@@ -80,6 +81,7 @@ __all__ = [
     "TermSeason",
     "DaisyCourse",
     "CourseStaff",
+    "CourseExam",
     "SyllabusCourse",
     "CourseResponsibility",
     # Handledning models

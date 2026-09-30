@@ -2,7 +2,7 @@
 
 import re
 from collections.abc import Callable
-from datetime import date, datetime
+from datetime import date, datetime, time
 from enum import Enum
 
 from pydantic import BaseModel, Field
@@ -535,6 +535,35 @@ class DaisyCourse(BaseModel):
     )
 
     model_config = {"frozen": True}
+
+
+class CourseExam(BaseModel):
+    """An examination occasion for a course offering.
+
+    Sourced from the *Examinationer* table on the public course schedule
+    page. Covers sit-down exams as well as deadlines for assignments and
+    project work; the latter have no time or rooms.
+    """
+
+    examination: str = Field(description="Examination component, e.g. 'Tentamen, 4 hp'")
+    ects: float | None = Field(default=None, description="Credits of the component")
+    kind: str = Field(description="Occasion type, e.g. 'Ordinarie tenta' / 'Omtenta'")
+    date: date
+    start_time: time | None = None
+    end_time: time | None = None
+    rooms: list[str] = Field(default_factory=list)
+
+    model_config = {"frozen": True}
+
+    @property
+    def start(self) -> datetime | None:
+        """Start as a naive Europe/Stockholm datetime, if the occasion has a time."""
+        return datetime.combine(self.date, self.start_time) if self.start_time else None
+
+    @property
+    def end(self) -> datetime | None:
+        """End as a naive Europe/Stockholm datetime, if the occasion has a time."""
+        return datetime.combine(self.date, self.end_time) if self.end_time else None
 
 
 class CourseStaff(BaseModel):

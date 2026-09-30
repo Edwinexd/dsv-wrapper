@@ -5,7 +5,7 @@ Integration tests run against the live Daisy instance and require credentials.
 """
 
 import logging
-from datetime import date
+from datetime import date, datetime, time
 from pathlib import Path
 
 import httpx
@@ -13,6 +13,7 @@ import pytest
 
 from dsv_wrapper import (
     AsyncDaisyClient,
+    CourseExam,
     CourseResponsibility,
     CourseStaff,
     DaisyClient,
@@ -24,6 +25,7 @@ from dsv_wrapper import (
 )
 from dsv_wrapper.parsers.daisy import (
     parse_course_detail,
+    parse_course_exams,
     parse_course_participants,
     parse_course_search,
     parse_staff_details,
@@ -221,6 +223,84 @@ class TestParseCourseDetail:
         html = _load("momentinfo_7689_sv.html").replace("2026-08-31 till", "i höst till")
         with pytest.raises(ParseError):
             parse_course_detail(html, "7689", BASE)
+
+
+# ---------------------------------------------------------------------------
+# Exam parser
+# ---------------------------------------------------------------------------
+
+
+class TestParseCourseExams:
+    def test_idsv_exams_swedish(self):
+        exams = parse_course_exams(_load("momentschema_7689_sv.html"))
+        assert [(e.kind, e.date, e.start_time, e.end_time) for e in exams] == [
+            ("Ordinarie tenta", date(2026, 9, 26), time(8), time(11)),
+            ("Ordinarie tenta", date(2026, 9, 26), time(12), time(15)),
+            ("Ordinarie tenta", date(2026, 9, 26), time(16), time(19)),
+            ("Inlämningsuppgift", date(2026, 9, 30), None, None),
+            ("Omtenta", date(2026, 12, 7), time(9), time(12)),
+            ("Omtenta", date(2026, 12, 7), time(13), time(16)),
+        ]
+        first = exams[0]
+        assert isinstance(first, CourseExam)
+        assert first.examination == "Tentamen, 4 hp"
+        assert first.ects == 4.0
+        assert first.rooms[:3] == ["Aula NOD", "D1", "D2"]
+        assert first.rooms[-1] == "T12"  # footnote asterisk stripped
+        assert "G10:1" in first.rooms
+        assert first.start == datetime(2026, 9, 26, 8, 0)
+        assert first.end == datetime(2026, 9, 26, 11, 0)
+        assert exams[2].rooms == ["DL40"]
+
+        assignment = exams[3]
+        assert assignment.examination == "Inlämningsuppgift, 3,5 hp"
+        assert assignment.ects == 3.5
+        assert assignment.rooms == []
+        assert assignment.start is None and assignment.end is None
+
+    def test_idsv_exams_english(self):
+        """The English page has the same occasions; only names are translated."""
+        sv = parse_course_exams(_load("momentschema_7689_sv.html"))
+        en = parse_course_exams(_load("momentschema_7689_en.html"))
+        neutral = {"ects", "date", "start_time", "end_time"}
+        assert [e.model_dump(include=neutral) for e in en] == [
+            e.model_dump(include=neutral) for e in sv
+        ]
+        assert en[0].examination == "Written exam, 4 hec"
+        assert en[0].rooms[0] == "Auditorium NOD"
+        assert en[3].examination == "Assignment, 3,5 hec"
+        # Free-text kinds stay as entered; default ones are translated.
+        assert [e.kind for e in en] == [
+            "Ordinarie tenta",
+            "Ordinarie tenta",
+            "Ordinarie tenta",
+            "Assignment",
+            "Omtenta",
+            "Omtenta",
+        ]
+
+    def test_db_exams_include_uppsamlingstenta(self):
+        exams = parse_course_exams(_load("momentschema_7619_sv.html"))
+        assert [(e.examination, e.kind, e.date) for e in exams] == [
+            ("Projektarbete, 3,5 hp", "Projektarbete", date(2026, 3, 22)),
+            ("Tentamen, 4 hp", "Ordinarie tenta", date(2026, 3, 22)),
+            ("Tentamen, 4 hp", "Omtenta", date(2026, 5, 27)),
+            ("Tentamen, 4 hp", "Uppsamlingstenta", date(2026, 8, 6)),
+        ]
+        assert exams[-1].rooms[-1] == "Lilla Hörsalen"
+
+    def test_schedule_without_exam_table(self):
+        html = _load("momentschema_7689_sv.html").replace(">Examinationer<", ">Annat<")
+        assert parse_course_exams(html) == []
+
+    def test_non_schedule_page_raises(self):
+        with pytest.raises(ParseError):
+            parse_course_exams("<html><body>404 Not Found</body></html>")
+
+    def test_malformed_time_raises(self):
+        html = _load("momentschema_7689_sv.html").replace("08:00-11:00", "förmiddag")
+        with pytest.raises(ParseError):
+            parse_course_exams(html)
 
 
 # ---------------------------------------------------------------------------
@@ -480,6 +560,17 @@ def test_daisy_get_course_and_participants(daisy_client):
     english = daisy_client.get_course(prog2.momenttillf_id, language="en")
     assert english.name == "Programming 2"
     assert (english.start_date, english.end_date) == (detail.start_date, detail.end_date)
+
+    exams = daisy_client.get_course_exams(prog2.momenttillf_id)
+    english_exams = daisy_client.get_course_exams(prog2.momenttillf_id, language="en")
+    assert any(e.kind == "Ordinarie tenta" and e.start and e.rooms for e in exams)
+    assert [(e.date, e.start_time) for e in english_exams] == [
+        (e.date, e.start_time) for e in exams
+    ]
+    assert exams[0].examination != english_exams[0].examination
+
+    with pytest.raises(ParseError):
+        daisy_client.get_course_exams(99999999)
 
     parts = daisy_client.get_course_participants(prog2.momenttillf_id)
     assert parts, "PROG2 has medverkande in Daisy"

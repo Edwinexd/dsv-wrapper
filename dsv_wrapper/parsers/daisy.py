@@ -9,6 +9,7 @@ from bs4 import NavigableString
 
 from ..exceptions import ParseError
 from ..models import (
+    CourseExam,
     CourseResponsibility,
     CourseStaff,
     DaisyCourse,
@@ -895,6 +896,63 @@ def parse_course_detail(html: str, momenttillf_id: str, base_url: str) -> DaisyC
         ],
         courses=courses,
     )
+
+
+_EXAM_TABLE_HEADINGS = {"examinationer", "examinations"}
+_TIME_RANGE_RE = re.compile(r"^(\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})$")
+
+
+def parse_course_exams(html: str) -> list[CourseExam]:
+    """Parse the *Examinationer* table of ``/servlet/schema.moment.Momentschema``.
+
+    Works on both the Swedish and the English version of the page. Each row
+    is ``component | kind | weekday | date | time | rooms``; time and rooms
+    are blank for examinations without a sitting (assignments, project work).
+    Returns ``[]`` for a schedule without an examinations table.
+    """
+    soup = parse_html(html)
+    # Daisy answers 200 for unknown ids, so make sure this is a schedule page.
+    if soup.find("td", class_="stortabellRubrikLjus") is None:
+        raise ParseError("Daisy did not return a course schedule page")
+
+    exams: list[CourseExam] = []
+    for heading in soup.find_all("td", class_="stortabellRubrik"):
+        if _collapse_ws(heading.get_text(" ", strip=True)).lower() not in _EXAM_TABLE_HEADINGS:
+            continue
+        for tr in heading.find_parent("table").find_all("tr"):
+            cells = [_collapse_ws(td.get_text(" ", strip=True)) for td in tr.find_all("td")]
+            if len(cells) < 2:  # heading and <th> rows
+                continue
+            if len(cells) != 6:
+                raise ParseError(f"Unexpected examination row: {cells!r}")
+            examination, kind, _weekday, day, times, rooms = cells
+            try:
+                exam_date = datetime.strptime(day, "%Y-%m-%d").date()
+            except ValueError as e:
+                raise ParseError(f"Unrecognised examination date: {day!r}") from e
+            start_time = end_time = None
+            if times:
+                m = _TIME_RANGE_RE.match(times)
+                if not m:
+                    raise ParseError(f"Unrecognised examination time: {times!r}")
+                try:
+                    start_time, end_time = parse_time(m.group(1)), parse_time(m.group(2))
+                except ValueError as e:
+                    raise ParseError(f"Unrecognised examination time: {times!r}") from e
+            _, _, points = examination.rpartition(", ")
+            exams.append(
+                CourseExam(
+                    examination=examination,
+                    ects=_parse_ects(points),
+                    kind=kind,
+                    date=exam_date,
+                    start_time=start_time,
+                    end_time=end_time,
+                    # The trailing "*" refers to the room address footnote.
+                    rooms=[r.strip() for r in rooms.rstrip("*").split(",") if r.strip()],
+                )
+            )
+    return exams
 
 
 def _split_name(full: str) -> tuple[str | None, str | None]:

@@ -19,6 +19,7 @@ from .exceptions import (
     RoomNotAvailableError,
 )
 from .models import (
+    CourseExam,
     CourseStaff,
     DaisyCourse,
     InstitutionID,
@@ -578,13 +579,13 @@ class DaisyClient:
                 break
         return all_courses
 
-    def _get_momentinfo(self, momenttillf_id: str | int, language: str) -> str:
-        """Fetch the public momentinfo page HTML in the given language."""
+    def _get_course_page(self, servlet: str, momenttillf_id: str | int, language: str) -> str:
+        """Fetch a public per-course servlet page (momentinfo, schedule) as HTML."""
         _validate_language(language)
         self._ensure_authenticated()
         response = self._client.get(
-            f"{self.base_url}/servlet/momentinfo.Momentinfo",
-            params={"id": str(momenttillf_id), "locale": language},
+            f"{self.base_url}/servlet/{servlet}",
+            params={"id": str(momenttillf_id), "daisy__lang": language},
             timeout=15,
         )
         response.raise_for_status()
@@ -608,7 +609,7 @@ class DaisyClient:
             ValueError: If ``language`` is unsupported.
             ParseError: If the page is not a course information page.
         """
-        html = self._get_momentinfo(momenttillf_id, language)
+        html = self._get_course_page("momentinfo.Momentinfo", momenttillf_id, language)
         return daisy_parsers.parse_course_detail(html, str(momenttillf_id), self.base_url)
 
     def get_course_schedule_ical(self, momenttillf_id: str | int, *, language: str = "sv") -> str:
@@ -643,6 +644,29 @@ class DaisyClient:
             raise ParseError("Daisy did not return a valid iCalendar course schedule")
         return calendar
 
+    def get_course_exams(
+        self, momenttillf_id: str | int, *, language: str = "sv"
+    ) -> list[CourseExam]:
+        """Fetch the examination occasions for a course offering.
+
+        Parses the *Examinationer* table of the public course schedule page:
+        every exam sitting (ordinary, re-exam, …) with date, time and rooms,
+        plus deadlines for assignments/project work (no time or rooms).
+        Works for any course in Daisy.
+
+        Args:
+            momenttillf_id: Daisy course-offering id.
+            language: Page language (``"sv"`` or ``"en"``). Affects the
+                component name (*Tentamen* / *Written exam*) and some room
+                names (*Aula NOD* / *Auditorium NOD*).
+
+        Raises:
+            ValueError: If ``language`` is unsupported.
+            ParseError: If Daisy does not return a course schedule page.
+        """
+        html = self._get_course_page("schema.moment.Momentschema", momenttillf_id, language)
+        return daisy_parsers.parse_course_exams(html)
+
     def get_course_participants(
         self, momenttillf_id: str | int, *, language: str = "sv"
     ) -> list[CourseStaff]:
@@ -662,7 +686,7 @@ class DaisyClient:
             language: Page language (``"sv"`` or ``"en"``). Role names are
                 translated by Daisy, e.g. *Handledare* becomes *Course assistant*.
         """
-        html = self._get_momentinfo(momenttillf_id, language)
+        html = self._get_course_page("momentinfo.Momentinfo", momenttillf_id, language)
         return daisy_parsers.parse_course_participants(html, self.base_url)
 
     def close(self) -> None:
@@ -1108,13 +1132,13 @@ class AsyncDaisyClient:
                 break
         return all_courses
 
-    async def _get_momentinfo(self, momenttillf_id: str | int, language: str) -> str:
-        """Fetch the public momentinfo page HTML in the given language."""
+    async def _get_course_page(self, servlet: str, momenttillf_id: str | int, language: str) -> str:
+        """Fetch a public per-course servlet page (momentinfo, schedule) as HTML."""
         _validate_language(language)
         await self._ensure_authenticated()
         response = await self._client.get(
-            f"{self.base_url}/servlet/momentinfo.Momentinfo",
-            params={"id": str(momenttillf_id), "locale": language},
+            f"{self.base_url}/servlet/{servlet}",
+            params={"id": str(momenttillf_id), "daisy__lang": language},
             timeout=15,
         )
         response.raise_for_status()
@@ -1125,7 +1149,7 @@ class AsyncDaisyClient:
 
         See :meth:`DaisyClient.get_course` for details.
         """
-        html = await self._get_momentinfo(momenttillf_id, language)
+        html = await self._get_course_page("momentinfo.Momentinfo", momenttillf_id, language)
         return daisy_parsers.parse_course_detail(html, str(momenttillf_id), self.base_url)
 
     async def get_course_schedule_ical(
@@ -1149,6 +1173,16 @@ class AsyncDaisyClient:
             raise ParseError("Daisy did not return a valid iCalendar course schedule")
         return calendar
 
+    async def get_course_exams(
+        self, momenttillf_id: str | int, *, language: str = "sv"
+    ) -> list[CourseExam]:
+        """Fetch the examination occasions for a course offering.
+
+        See :meth:`DaisyClient.get_course_exams` for details.
+        """
+        html = await self._get_course_page("schema.moment.Momentschema", momenttillf_id, language)
+        return daisy_parsers.parse_course_exams(html)
+
     async def get_course_participants(
         self, momenttillf_id: str | int, *, language: str = "sv"
     ) -> list[CourseStaff]:
@@ -1156,7 +1190,7 @@ class AsyncDaisyClient:
 
         See :meth:`DaisyClient.get_course_participants` for details.
         """
-        html = await self._get_momentinfo(momenttillf_id, language)
+        html = await self._get_course_page("momentinfo.Momentinfo", momenttillf_id, language)
         return daisy_parsers.parse_course_participants(html, self.base_url)
 
     async def download_profile_picture(self, url: str, max_retries: int = 3) -> bytes:

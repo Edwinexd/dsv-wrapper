@@ -130,6 +130,8 @@ with DaisyClient() as daisy:
 
 `CourseStaff.get_person_id(client)` is cached: it returns the parsed `person_id` from the page immediately, falls back to a Daisy student search by full first+last name (with a second attempt using `first_token / remaining_tokens` for multi-word surnames like *Fathi Tachinabadi*), and raises `AmbiguousMatchError` on 0 or >1 hits. `Student.get_username(client)` and `Staff.get_usernames(client)` follow the same lazy-cache-or-throw pattern.
 
+`daisy.get_course_exams(momenttillf_id)` returns the course's examination occasions as `CourseExam`s (`examination`, `ects`, `kind`, `date`, `start_time`, `end_time`, `rooms`, plus `start`/`end` datetimes). Every exam sitting is listed separately, and assignment/project deadlines are included without a time or rooms. It also accepts `language="en"`.
+
 For calendar synchronization, use `daisy.get_course_schedule_ical(momenttillf_id)` (or
 `await async_daisy.get_course_schedule_ical(...)`). It fetches Daisy's authenticated RFC 5545
 feed, including stable event `UID` values, `LAST-MODIFIED`, and the `Europe/Stockholm` timezone.
@@ -342,7 +344,8 @@ from dsv_wrapper.models import (
     BookingSlot, RoomActivity, BookableRoom, Schedule, Break,
     Student, Teacher, Course, Staff, ActivityType,
     # Daisy course / medverkande
-    Semester, TermSeason, DaisyCourse, CourseStaff, CourseResponsibility,
+    Semester, TermSeason, DaisyCourse, SyllabusCourse, CourseExam, CourseStaff,
+    CourseResponsibility,
     # Handledning models
     QueueEntry, QueueStatus, HandledningSession,
     # Clickmap models

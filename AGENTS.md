@@ -198,6 +198,13 @@
     the *Kurser* section (`name`, `code` e.g. `IB130N`, `requirement` e.g.
     "obligatorisk", `level`, `syllabus_url`). `DaisyCourse.syllabus_url` is
     the first of these.
+  - `CourseExam`: an examination occasion from the *Examinationer* table of
+    the public schedule page (`examination` e.g. "Tentamen, 4 hp", `ects`,
+    `kind` e.g. "Ordinarie tenta"/"Omtenta"/"Uppsamlingstenta", `date`,
+    `start_time`, `end_time`, `rooms: list[str]`, plus `start`/`end`
+    datetime properties). Assignment/project deadlines are included too and
+    have no time or rooms. One row per sitting – a big exam split over
+    several time slots (IDSV: 08–11, 12–15, 16–19) yields several rows.
   - `CourseStaff`: a person involved on a course (`name`, `first_name`,
     `last_name`, `person_id`, `profile_url`, `roles: list[str]`). Sourced
     from the public momentinfo page's *Medverkande* section, which groups
@@ -242,13 +249,23 @@
     `POST /sok/sokmoment.jspa` (20 per page, `querypage=N` 0-indexed). Pass
     `semester` for a single term, or `semester_from`/`semester_to` for a range.
   - `get_course(momenttillf_id, *, language="sv")`: fetches
-    `/servlet/momentinfo.Momentinfo?id=…&locale=sv|en` and parses every
+    `/servlet/momentinfo.Momentinfo?id=…&daisy__lang=sv|en` and parses every
     field on the page (see `DaisyCourse` above).
-  - **Momentinfo language**: both `get_course` and `get_course_participants`
-    take `language="sv"|"en"` and always send `locale` explicitly – without
-    it Daisy picks a language itself (English when unauthenticated). Names,
-    free text and **role names** follow the page language (e.g. *Handledare*
-    ↔ *Course assistant*); ids, dates, credits and URLs are identical.
+  - `get_course_exams(momenttillf_id, *, language="sv")`: fetches
+    `/servlet/schema.moment.Momentschema?id=…&daisy__lang=sv|en` and returns
+    `CourseExam`s. Preferred over filtering the iCal feed, where exams are
+    only recognisable by free text ("Salsskrivning …").
+  - **Page language**: `get_course`, `get_course_exams` and
+    `get_course_participants` take `language="sv"|"en"` and always send
+    `daisy__lang` explicitly (shared `_get_course_page` helper) – without
+    it Daisy follows `Accept-Language` (English by default). `daisy__lang`
+    works on every servlet page and is not sticky across requests;
+    `locale=` only works on momentinfo, NOT on the schedule page. Names,
+    free text, **role names** (*Handledare* ↔ *Course assistant*),
+    examination components (*Tentamen* ↔ *Written exam*) and some room
+    names (*Aula NOD* ↔ *Auditorium NOD*) follow the page language; ids,
+    dates, times, credits and URLs are identical. Free-text exam kinds
+    ("Ordinarie tenta") are not translated.
   - `get_course_participants(momenttillf_id, *, language="sv")`: parses the
     public momentinfo page's *Medverkande* section and returns `CourseStaff`s. Works for any
     course in Daisy, not just ones you teach (unlike the auth-gated
@@ -278,6 +295,12 @@
     the header block is missing, the date row is malformed, or a *Kurser*
     line doesn't match. The "Publicerade dokument för examinationer"
     section is not parsed.
+  - `parse_course_exams` finds the table headed *Examinationer* /
+    *Examinations* on the schedule page and reads its six positional
+    columns (component, kind, weekday, date, time, rooms); strips the `*`
+    room-footnote marker. Returns `[]` when the table is absent; raises
+    `ParseError` on malformed rows/dates/times or a non-schedule page
+    (Daisy answers **HTTP 200** with a "404 Not Found" page for unknown ids).
   - `parse_course_participants` walks the role-grouped
     `<div class="brodtext">` blocks in the *Medverkande* row of the
     momentinfo page; each block starts with `<b>RoleName</b>` and contains
@@ -294,9 +317,10 @@
   - `/sok/sokmoment.jspa` (POST) — course search; fields: `institution=4` for
     DSV, `fromTerminID`/`tomTerminID` (5-digit `YYYY[12]`), `beteckning`,
     `namn`, optional `querypage` for pagination.
-  - `/servlet/momentinfo.Momentinfo?id=N&locale=sv|en` — public detail page
-    (readable without login).
-  - `/servlet/schema.moment.Momentschema?id=N` — schedule.
+  - `/servlet/momentinfo.Momentinfo?id=N&daisy__lang=sv|en` — public detail
+    page (readable without login).
+  - `/servlet/schema.moment.Momentschema?id=N&daisy__lang=sv|en` — public
+    schedule page: a teaching table plus an examinations table.
   - `/anstalld/moment/deltagarlista.jspa?momenttillfID=N` — student list.
   - `/anstalld/moment/momentNav.jspa?momenttillfID=N&akt={inf|mdv|sch|exa|grp|utv|upp|med}`
     — internal staff nav (`mdv` = medverkande, `med` = meddelanden). The
@@ -341,6 +365,7 @@
 - ✅ **Play client added** (new service - 2026-03-31) - DSVPlay presentations, transcripts, courses
 - ✅ **Daisy course/medverkande API** (2026-05-19) - `get_courses(semester)`, `get_course`, `get_course_participants`, extended `Staff` fields
 - ✅ **Full momentinfo parsing in Swedish and English** (2026-09-30) - `get_course` now returns start/end dates and every other field on the page; `language` option on `get_course`/`get_course_participants`
+- ✅ **Course exams** (2026-09-30) - `get_course_exams` returns exam sittings and assignment deadlines from the schedule page's examinations table, in Swedish or English
 - ✅ BaseAsyncClient removed
 - ✅ Old unified client files removed (base_unified.py, shibboleth_unified.py, actlab_unified.py)
 - ✅ requirements.txt updated (removed requests and aiohttp dependencies)
@@ -382,4 +407,4 @@
 - Mail tests now use IMAP/SMTP instead of OWA API
 - Mail send tests use `AUTOMATEDTESTSEND - {timestamp}` pattern for easy cleanup
 - Play tests include: courses, presentations listing, full presentation details, transcript, API parity
-- Daisy course tests use captured HTML fixtures in `tests/fixtures/daisy/` and exercise `Semester`, course-search pagination header, course detail parsing in both Swedish and English (`momentinfo_7689_sv.html` / `_en.html`), role-grouped medverkande, and rich-staff parsing
+- Daisy course tests use captured HTML fixtures in `tests/fixtures/daisy/` and exercise `Semester`, course-search pagination header, course detail parsing in both Swedish and English (`momentinfo_7689_sv.html` / `_en.html`), the schedule page's examinations table (`momentschema_*.html`), role-grouped medverkande, and rich-staff parsing
