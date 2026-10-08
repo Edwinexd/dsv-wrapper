@@ -157,6 +157,15 @@
   - `get_presentation(presentation_id)`: Get full presentation details (sources, subtitles, token)
   - `get_transcript(presentation_id)`: Get parsed VTT transcript as list of cues
   - `get_transcript_text(presentation_id)`: Get plain text transcript
+  - `get_media_tracks(presentation_uuid)`: List mp4 tracks (`TrackInfo`: opaque
+    `index`, `height` 720/1080, `size_bytes` via HEAD, `mime_type`). Every source
+    (main/left/right/manual capture) × quality is one track. Indexes embed no
+    URLs/JWTs and must not be persisted across sessions.
+  - `download_track(presentation_uuid, track_index, dest_path)`: Stream an mp4
+    to disk in ~1 MiB chunks
+  - `stream_track(presentation_uuid, track_index, *, start_byte=0, end_byte=None)`:
+    Iterate bytes, optionally as an HTTP byte range (CDN returns 206); useful
+    for cheap moov-atom probes
 - **Parsing** (`dsv_wrapper/parsers/play.py`):
   - Courses parsed from Livewire `wire:snapshot` JSON in HTML
   - Playlist ID extracted from Livewire data on designation pages
