@@ -1,13 +1,17 @@
 """Parsing functions for DSVPlay (play.dsv.su.se)."""
 
+import base64
+import binascii
 import json
 import logging
 import re
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from ..exceptions import ParseError, PresentationNotReadyError
 from ..models.play import (
     PlayCourse,
     Presentation,
+    TrackDownload,
     TranscriptCue,
     VideoSource,
 )
@@ -43,6 +47,40 @@ def enumerate_track_descriptors(
                 continue
             descriptors.append((url, source_name, _QUALITY_HEIGHTS.get(quality_label)))
     return descriptors
+
+
+def resolve_track_download(presentation: Presentation, track_index: int) -> TrackDownload:
+    """Resolve a track from the *same* envelope used to select it.
+
+    No SSO cookie is needed for this bearer URL. A fresh envelope is required
+    for retries after expiry. Missing/malformed exp fails rather than guessing
+    a lifetime. The JWT signature is verified by Play, not by this parser.
+    """
+    tracks = enumerate_track_descriptors(presentation)
+    if track_index < 0 or track_index >= len(tracks):
+        raise ValueError("track_index out of range")
+    try:
+        parts = presentation.token.split(".")
+        if len(parts) != 3:
+            raise ValueError("JWT needs three segments")
+        payload = json.loads(base64.urlsafe_b64decode(parts[1] + "=" * (-len(parts[1]) % 4)))
+        if not isinstance(payload, dict):
+            raise ValueError("JWT payload must be an object")
+        expiry = payload["exp"]
+        if type(expiry) is not int or expiry <= 0:
+            raise ValueError("exp must be a positive integer")
+    except (ValueError, KeyError, TypeError, binascii.Error) as exc:
+        raise ParseError("Media JWT has no valid download deadline") from exc
+    url, source_name, height = tracks[track_index]
+    parsed = urlsplit(url)
+    query = [(k, v) for k, v in parse_qsl(parsed.query) if k != "token"]
+    query.append(("token", presentation.token))
+    return TrackDownload(
+        url=urlunsplit(parsed._replace(query=urlencode(query))),
+        expires_at=expiry,
+        source_name=source_name,
+        height=height,
+    )
 
 
 def _parse_courses_from_component(html: str, component_name: str) -> list[PlayCourse]:

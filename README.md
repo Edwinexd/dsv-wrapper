@@ -554,3 +554,13 @@ ruff check dsv_wrapper/
 ## Support
 
 For issues and questions, please open an issue on the repository.
+
+
+For an internal media downloader, `PlayClient.get_track_download(uuid, index)`
+(and `AsyncPlayClient.get_track_download`) returns `TrackDownload` with a
+short-lived bearer `url`, `expires_at` (Unix seconds from the JWT's `exp`),
+`source_name`, and `height`. Keep the URL out of logs and renew it after
+expiry. For track selection using an already fetched presentation, use
+`dsv_wrapper.parsers.play.resolve_track_download(presentation, index)` to
+resolve from that exact envelope without re-fetching/reordering its sources.
+The token payload is decoded only for scheduling; Play authenticates it.

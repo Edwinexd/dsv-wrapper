@@ -97,6 +97,22 @@ class Presentation(BaseModel):
         return ""
 
 
+class TrackDownload(BaseModel):
+    """Short-lived bearer URL for a direct media download.
+
+    Keep out of logs. expires_at is the token's Unix exp deadline, decoded
+    without signature verification: it is scheduling information, not proof
+    of authenticity. The media server still authenticates every request.
+    """
+
+    url: str = Field(repr=False)
+    expires_at: int
+    source_name: str
+    height: int | None = None
+
+    model_config = {"frozen": True}
+
+
 class TrackInfo(BaseModel):
     """Metadata for a single mp4 track attached to a presentation.
 

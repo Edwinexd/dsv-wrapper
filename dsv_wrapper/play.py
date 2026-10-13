@@ -15,7 +15,7 @@ from .exceptions import (
     ParseError,
     TranscriptNotReadyError,
 )
-from .models.play import PlayCourse, Presentation, TrackInfo, TranscriptCue
+from .models.play import PlayCourse, Presentation, TrackDownload, TrackInfo, TranscriptCue
 from .parsers.play import (
     enumerate_track_descriptors,
     parse_courses_from_html,
@@ -25,6 +25,7 @@ from .parsers.play import (
     parse_presentation_ids_from_html,
     parse_presentation_json,
     parse_vtt,
+    resolve_track_download,
 )
 from .utils import DEFAULT_HEADERS, DSV_URLS
 
@@ -370,6 +371,10 @@ class PlayClient:
                 )
             )
         return tracks
+
+    def get_track_download(self, presentation_uuid: str, track_index: int) -> TrackDownload:
+        """Get a fresh bearer URL and its download deadline; never log the URL."""
+        return resolve_track_download(self.get_presentation(presentation_uuid), track_index)
 
     def download_track(
         self,
@@ -813,6 +818,10 @@ class AsyncPlayClient:
                 )
             )
         return tracks
+
+    async def get_track_download(self, presentation_uuid: str, track_index: int) -> TrackDownload:
+        """Async counterpart of :meth:`PlayClient.get_track_download`."""
+        return resolve_track_download(await self.get_presentation(presentation_uuid), track_index)
 
     async def download_track(
         self,
