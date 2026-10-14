@@ -1,13 +1,13 @@
 ## Project Status
 
-- **99 of 99 pytest tests passing** - 100% pass rate!
+- **136 of 136 pytest tests passing** - 100% pass rate!
 - **Major architecture refactor COMPLETE**: Fully migrated from requests/aiohttp to httpx
 - **Strict error handling implemented**: Silent failures replaced with explicit ParseError exceptions
 - All clients (ACTLab, Daisy, Handledning, Clickmap, Play) now use unified httpx architecture
 - Sync and async clients have full API parity with automated tests to prevent de-sync
 - **All authentication and cookie issues resolved**
 - ~50% code duplication eliminated through shared parsing functions
-- BaseAsyncClient removed - no longer needed
+- **NEW: Retries + shared base clients** - transient network failures are retried; all service clients inherit `BaseClient`/`BaseAsyncClient`
 - Disclaimer added to README regarding AI-generated code experiment
 - **NEW: Clickmap client added** - Extract DSV office/workspace placements
 - **NEW: Mail client added** - Send and read emails via SU webmail (mail.su.se)
@@ -28,7 +28,16 @@
 - `ShibbolethAuth` now uses `httpx.Client` instead of `requests.Session`
 - `AsyncShibbolethAuth` still wraps sync auth using `asyncio.to_thread()` but now works with httpx
 - All clients use `httpx.Client` (sync) or `httpx.AsyncClient` (async)
-- **BaseAsyncClient completely removed** - all clients follow the new httpx pattern
+- **Shared base classes** (`dsv_wrapper/base.py`, 2026-10-14): `BaseClient` / `BaseAsyncClient` own
+  credential resolution (args or `SU_USERNAME`/`SU_PASSWORD`), `ShibbolethAuth`, the private `_client`,
+  lazy `_ensure_authenticated()` with cookie copy, and `close`/context managers. Service clients only
+  call `super().__init__(username, password, service, base_url, ..., follow_redirects=...)`.
+  Async Daisy/Handledning/ACTLab and sync ACTLab use `follow_redirects=False` (preserved behaviour).
+- **Retries** (`dsv_wrapper/retry.py`): every httpx client is built via `create_client()` /
+  `create_async_client()`, which install `RetryTransport` / `AsyncRetryTransport` (3 retries,
+  exponential backoff + jitter, honours numeric `Retry-After`). Connect errors/timeouts are retried
+  for all methods; dropped connections, read errors and 429/502/503/504 only for idempotent methods
+  (never re-sends a POST the server may have received). Never construct `httpx.Client` directly.
 - All async clients use `__aenter__`/`__aexit__` context managers with httpx.AsyncClient
 - **httpx clients are private** - stored as `_client` (not `client`) to prevent external access to internal HTTP client
 
@@ -52,7 +61,8 @@
 - Cookie conflict issues resolved by using cookie jar directly
 - **Added `download_profile_picture(url)` method**: Proper wrapper method for downloading images
   - Returns image bytes directly
-  - Raises `NetworkError` on HTTP failures
+  - Raises `NetworkError` on HTTP failures (transient failures retried by the transport; the old
+    `max_retries` parameter was removed)
   - Validates content type to ensure response is an image
   - External code no longer needs to access internal httpx client
 
@@ -375,7 +385,8 @@
 - ✅ **Daisy course/medverkande API** (2026-05-19) - `get_courses(semester)`, `get_course`, `get_course_participants`, extended `Staff` fields
 - ✅ **Full momentinfo parsing in Swedish and English** (2026-09-30) - `get_course` now returns start/end dates and every other field on the page; `language` option on `get_course`/`get_course_participants`
 - ✅ **Course exams** (2026-09-30) - `get_course_exams` returns exam sittings and assignment deadlines from the schedule page's examinations table, in Swedish or English
-- ✅ BaseAsyncClient removed
+- ✅ Old aiohttp BaseAsyncClient removed; replaced by httpx `BaseClient`/`BaseAsyncClient` (2026-10-14)
+- ✅ Retrying transport for flaky DSV services (2026-10-14) - unit tests in `tests/test_retry.py`
 - ✅ Old unified client files removed (base_unified.py, shibboleth_unified.py, actlab_unified.py)
 - ✅ requirements.txt updated (removed requests and aiohttp dependencies)
 - ✅ All parsing functions extracted to dsv_wrapper/parsers/
@@ -405,7 +416,7 @@
 
 ## Testing Notes
 
-- **Test coverage: 99/99 passing - 100%!**
+- **Test coverage: 136/136 passing - 100%!**
 - All authentication tests pass including invalid credentials detection
 - API parity tests verify sync/async clients have identical method signatures
 - All ACTLab, Daisy, Handledning, Clickmap, Mail, and Play tests pass

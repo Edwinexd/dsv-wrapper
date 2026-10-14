@@ -1,20 +1,16 @@
 """Handledning client for lab supervision queue management."""
 
-import os
 import re
 
-import httpx
-
-from .auth import AsyncShibbolethAuth, ShibbolethAuth
 from .auth.cache_backend import CacheBackend
-from .exceptions import AuthenticationError, HandledningError, QueueError
+from .base import BaseAsyncClient, BaseClient
+from .exceptions import HandledningError, QueueError
 from .models import (
     HandledningSession,
     QueueEntry,
 )
 from .parsers import handledning as handledning_parsers
 from .utils import (
-    DEFAULT_HEADERS,
     DSV_URLS,
     build_url,
     extract_text,
@@ -22,7 +18,7 @@ from .utils import (
 )
 
 
-class HandledningClient:
+class HandledningClient(BaseClient):
     """Synchronous client for Handledning system."""
 
     def __init__(
@@ -45,33 +41,15 @@ class HandledningClient:
         Raises:
             AuthenticationError: If username/password not provided and not in env vars
         """
-        # Get credentials from env vars if not provided
-        self.username = username or os.environ.get("SU_USERNAME")
-        self.password = password or os.environ.get("SU_PASSWORD")
-
-        if not self.username or not self.password:
-            raise AuthenticationError(
-                "Username and password must be provided either as arguments or "
-                "via SU_USERNAME and SU_PASSWORD environment variables"
-            )
-        self.mobile = mobile
-        self.base_url = DSV_URLS["handledning_mobile" if mobile else "handledning_desktop"]
-        self.auth = ShibbolethAuth(
-            self.username, self.password, cache_backend=cache_backend, cache_ttl=cache_ttl
+        super().__init__(
+            username,
+            password,
+            "handledning",
+            DSV_URLS["handledning_mobile" if mobile else "handledning_desktop"],
+            cache_backend=cache_backend,
+            cache_ttl=cache_ttl,
         )
-        self._client = httpx.Client(headers=DEFAULT_HEADERS, follow_redirects=True)
-        self._authenticated = False
-
-    def _ensure_authenticated(self) -> None:
-        """Ensure the client is authenticated."""
-        if not self._authenticated:
-            self.auth._login("handledning")
-            # Copy cookies from auth client to this client
-            for cookie in self.auth._client.cookies.jar:
-                self._client.cookies.set(
-                    cookie.name, cookie.value, domain=cookie.domain, path=cookie.path
-                )
-            self._authenticated = True
+        self.mobile = mobile
 
     def get_teacher_sessions(self, teacher_username: str | None = None) -> list[HandledningSession]:
         """Get all active sessions for a teacher.
@@ -230,21 +208,8 @@ class HandledningClient:
 
         return handledning_parsers.parse_teacher_sessions(response.text, self.username)
 
-    def close(self) -> None:
-        """Close the client session."""
-        self._client.close()
-        self.auth.__exit__(None, None, None)
 
-    def __enter__(self):
-        """Context manager entry."""
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        """Context manager exit."""
-        self.close()
-
-
-class AsyncHandledningClient:
+class AsyncHandledningClient(BaseAsyncClient):
     """Asynchronous client for Handledning system."""
 
     def __init__(
@@ -267,46 +232,16 @@ class AsyncHandledningClient:
         Raises:
             AuthenticationError: If username/password not provided and not in env vars
         """
-        # Get credentials from env vars if not provided
-        self.username = username or os.environ.get("SU_USERNAME")
-        self.password = password or os.environ.get("SU_PASSWORD")
-
-        if not self.username or not self.password:
-            raise AuthenticationError(
-                "Username and password must be provided either as arguments or "
-                "via SU_USERNAME and SU_PASSWORD environment variables"
-            )
-
-        self.mobile = mobile
-        self.base_url = DSV_URLS["handledning_mobile" if mobile else "handledning_desktop"]
-        self.auth = AsyncShibbolethAuth(
-            self.username, self.password, cache_backend=cache_backend, cache_ttl=cache_ttl
+        super().__init__(
+            username,
+            password,
+            "handledning",
+            DSV_URLS["handledning_mobile" if mobile else "handledning_desktop"],
+            cache_backend=cache_backend,
+            cache_ttl=cache_ttl,
+            follow_redirects=False,
         )
-        self._client: httpx.AsyncClient | None = None
-        self._authenticated = False
-
-    async def __aenter__(self):
-        """Async context manager entry."""
-        await self.auth.__aenter__()
-        self._client = httpx.AsyncClient(headers=DEFAULT_HEADERS)
-        return self
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Async context manager exit."""
-        if self._client:
-            await self._client.aclose()
-        await self.auth.__aexit__(exc_type, exc_val, exc_tb)
-
-    async def _ensure_authenticated(self) -> None:
-        """Ensure the client is authenticated."""
-        if not self._authenticated:
-            await self.auth.login(service="handledning")
-            # Copy cookies from auth client to this client (preserve domain/path)
-            for cookie in self.auth._sync_auth._client.cookies.jar:
-                self._client.cookies.set(
-                    cookie.name, cookie.value, domain=cookie.domain, path=cookie.path
-                )
-            self._authenticated = True
+        self.mobile = mobile
 
     async def get_teacher_sessions(
         self, teacher_username: str | None = None

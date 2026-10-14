@@ -6,7 +6,8 @@ from typing import Literal
 import httpx
 
 from ..exceptions import AuthenticationError, NetworkError
-from ..utils import DEFAULT_HEADERS, DSV_SSO_TARGETS, extract_attr, parse_html
+from ..retry import create_client
+from ..utils import DSV_SSO_TARGETS, extract_attr, parse_html
 from .cache_backend import CacheBackend, NullCache
 
 logger = logging.getLogger(__name__)
@@ -36,7 +37,7 @@ class ShibbolethAuth:
         self.password = password
         self.cache_backend = cache_backend if cache_backend is not None else NullCache()
         self.cache_ttl = cache_ttl
-        self._client = httpx.Client(headers=DEFAULT_HEADERS, follow_redirects=False)
+        self._client = create_client(follow_redirects=False)
 
         logger.debug(f"Initialized ShibbolethAuth for user: {username}")
         logger.debug(f"Cache backend: {type(self.cache_backend).__name__}")

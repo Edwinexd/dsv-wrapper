@@ -1,14 +1,13 @@
 """ACT Lab client for digital signage management."""
 
 import logging
-import os
 from pathlib import Path
 
 import httpx
 
-from .auth import AsyncShibbolethAuth, ShibbolethAuth
 from .auth.cache_backend import CacheBackend
-from .exceptions import ACTLabError, AuthenticationError
+from .base import BaseAsyncClient, BaseClient
+from .exceptions import ACTLabError
 from .models.actlab import Slide, SlideUploadResult
 from .parsers.actlab import (
     SlideUploadError,
@@ -18,6 +17,7 @@ from .parsers.actlab import (
     parse_slides,
     parse_upload_form,
 )
+from .retry import AsyncRetryTransport, RetryTransport
 from .utils import DEFAULT_HEADERS
 
 logger = logging.getLogger(__name__)
@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 ACTLAB_BASE_URL = "https://www2.dsv.su.se/act-lab/admin/"
 
 
-class ACTLabClient:
+class ACTLabClient(BaseClient):
     """Synchronous client for ACT Lab digital signage system."""
 
     def __init__(
@@ -46,36 +46,15 @@ class ACTLabClient:
         Raises:
             AuthenticationError: If username/password not provided and not in env vars
         """
-        # Get credentials from env vars if not provided
-        self.username = username or os.environ.get("SU_USERNAME")
-        self.password = password or os.environ.get("SU_PASSWORD")
-
-        if not self.username or not self.password:
-            raise AuthenticationError(
-                "Username and password must be provided either as arguments or "
-                "via SU_USERNAME and SU_PASSWORD environment variables"
-            )
-
-        self.auth = ShibbolethAuth(
-            self.username, self.password, cache_backend=cache_backend, cache_ttl=cache_ttl
+        super().__init__(
+            username,
+            password,
+            "actlab",
+            ACTLAB_BASE_URL,
+            cache_backend=cache_backend,
+            cache_ttl=cache_ttl,
+            follow_redirects=False,
         )
-        self._client = httpx.Client(headers=DEFAULT_HEADERS)
-        self._authenticated = False
-
-        logger.debug(f"Initialized ACTLabClient for user: {self.username}")
-
-    def _ensure_authenticated(self) -> None:
-        """Ensure the client is authenticated."""
-        if not self._authenticated:
-            logger.info("Authenticating to ACT Lab admin")
-            self.auth._login(service="actlab")
-            # Copy cookies with domain/path preserved
-            for cookie in self.auth._client.cookies.jar:
-                self._client.cookies.set(
-                    cookie.name, cookie.value, domain=cookie.domain, path=cookie.path
-                )
-            self._authenticated = True
-            logger.info("Successfully authenticated to ACT Lab")
 
     def _get_cookie_header(self) -> str:
         """Build Cookie header string from client cookies."""
@@ -97,7 +76,7 @@ class ACTLabClient:
         # ACT Lab sets error cookies with Swedish characters that crash httpx
         headers = {**DEFAULT_HEADERS, "Cookie": self._get_cookie_header()}
         request = httpx.Request("POST", action_url, data=data, headers=headers)
-        transport = httpx.HTTPTransport()
+        transport = RetryTransport()
         try:
             response = transport.handle_request(request)
         finally:
@@ -357,21 +336,8 @@ class ACTLabClient:
         logger.info("No slides to remove")
         return 0
 
-    def close(self) -> None:
-        """Close the client session."""
-        self._client.close()
-        self.auth.__exit__(None, None, None)
 
-    def __enter__(self):
-        """Context manager entry."""
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        """Context manager exit."""
-        self.close()
-
-
-class AsyncACTLabClient:
+class AsyncACTLabClient(BaseAsyncClient):
     """Asynchronous client for ACT Lab digital signage system."""
 
     def __init__(
@@ -392,48 +358,15 @@ class AsyncACTLabClient:
         Raises:
             AuthenticationError: If username/password not provided and not in env vars
         """
-        # Get credentials from env vars if not provided
-        self.username = username or os.environ.get("SU_USERNAME")
-        self.password = password or os.environ.get("SU_PASSWORD")
-
-        if not self.username or not self.password:
-            raise AuthenticationError(
-                "Username and password must be provided either as arguments or "
-                "via SU_USERNAME and SU_PASSWORD environment variables"
-            )
-
-        self.auth = AsyncShibbolethAuth(
-            self.username, self.password, cache_backend=cache_backend, cache_ttl=cache_ttl
+        super().__init__(
+            username,
+            password,
+            "actlab",
+            ACTLAB_BASE_URL,
+            cache_backend=cache_backend,
+            cache_ttl=cache_ttl,
+            follow_redirects=False,
         )
-        self._client: httpx.AsyncClient | None = None
-        self._authenticated = False
-
-        logger.debug(f"Initialized AsyncACTLabClient for user: {self.username}")
-
-    async def __aenter__(self):
-        """Async context manager entry."""
-        await self.auth.__aenter__()
-        self._client = httpx.AsyncClient(headers=DEFAULT_HEADERS)
-        return self
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Async context manager exit."""
-        if self._client:
-            await self._client.aclose()
-        await self.auth.__aexit__(exc_type, exc_val, exc_tb)
-
-    async def _ensure_authenticated(self) -> None:
-        """Ensure the client is authenticated."""
-        if not self._authenticated:
-            logger.info("Authenticating to ACT Lab admin")
-            await self.auth.login(service="actlab")
-            # Copy cookies from auth client to this client (preserve domain/path)
-            for cookie in self.auth._sync_auth._client.cookies.jar:
-                self._client.cookies.set(
-                    cookie.name, cookie.value, domain=cookie.domain, path=cookie.path
-                )
-            self._authenticated = True
-            logger.info("Successfully authenticated to ACT Lab")
 
     def _get_cookie_header(self) -> str:
         """Build Cookie header string from client cookies."""
@@ -455,7 +388,7 @@ class AsyncACTLabClient:
         # ACT Lab sets error cookies with Swedish characters that crash httpx
         headers = {**DEFAULT_HEADERS, "Cookie": self._get_cookie_header()}
         request = httpx.Request("POST", action_url, data=data, headers=headers)
-        transport = httpx.AsyncHTTPTransport()
+        transport = AsyncRetryTransport()
         try:
             response = await transport.handle_async_request(request)
         finally:

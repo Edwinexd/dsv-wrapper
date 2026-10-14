@@ -1,20 +1,19 @@
 """Clickmap client for DSV office/workspace placement map."""
 
 import logging
-import os
 
 import httpx
 
-from .auth import AsyncShibbolethAuth, ShibbolethAuth
 from .auth.cache_backend import CacheBackend
-from .exceptions import AuthenticationError, NetworkError
+from .base import BaseAsyncClient, BaseClient
+from .exceptions import NetworkError
 from .models import Placement
-from .utils import DEFAULT_HEADERS, DSV_URLS
+from .utils import DSV_URLS
 
 logger = logging.getLogger(__name__)
 
 
-class ClickmapClient:
+class ClickmapClient(BaseClient):
     """Synchronous client for Clickmap system.
 
     Clickmap provides a map of DSV office/workspace placements with person assignments.
@@ -38,36 +37,14 @@ class ClickmapClient:
         Raises:
             AuthenticationError: If username/password not provided and not in env vars
         """
-        self.username = username or os.environ.get("SU_USERNAME")
-        self.password = password or os.environ.get("SU_PASSWORD")
-
-        if not self.username or not self.password:
-            raise AuthenticationError(
-                "Username and password must be provided either as arguments or "
-                "via SU_USERNAME and SU_PASSWORD environment variables"
-            )
-
-        self.base_url = DSV_URLS["clickmap"]
-        self.auth = ShibbolethAuth(
-            self.username, self.password, cache_backend=cache_backend, cache_ttl=cache_ttl
+        super().__init__(
+            username,
+            password,
+            "clickmap",
+            DSV_URLS["clickmap"],
+            cache_backend=cache_backend,
+            cache_ttl=cache_ttl,
         )
-        self._client = httpx.Client(headers=DEFAULT_HEADERS, follow_redirects=True)
-        self._authenticated = False
-
-        logger.debug(f"Initialized ClickmapClient for user: {self.username}")
-
-    def _ensure_authenticated(self) -> None:
-        """Ensure the client is authenticated."""
-        if not self._authenticated:
-            logger.debug("Authenticating to clickmap...")
-            self.auth._login("clickmap")
-            # Copy cookies from auth client to this client
-            for cookie in self.auth._client.cookies.jar:
-                self._client.cookies.set(
-                    cookie.name, cookie.value, domain=cookie.domain, path=cookie.path
-                )
-            self._authenticated = True
-            logger.debug("Successfully authenticated to clickmap")
 
     def get_placements(self) -> list[Placement]:
         """Get all workspace placements.
@@ -171,21 +148,8 @@ class ClickmapClient:
         """
         return [p for p in self.get_placements() if not p.is_occupied]
 
-    def close(self) -> None:
-        """Close the client session."""
-        self._client.close()
-        self.auth.__exit__(None, None, None)
 
-    def __enter__(self):
-        """Context manager entry."""
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        """Context manager exit."""
-        self.close()
-
-
-class AsyncClickmapClient:
+class AsyncClickmapClient(BaseAsyncClient):
     """Asynchronous client for Clickmap system.
 
     Clickmap provides a map of DSV office/workspace placements with person assignments.
@@ -209,48 +173,14 @@ class AsyncClickmapClient:
         Raises:
             AuthenticationError: If username/password not provided and not in env vars
         """
-        self.username = username or os.environ.get("SU_USERNAME")
-        self.password = password or os.environ.get("SU_PASSWORD")
-
-        if not self.username or not self.password:
-            raise AuthenticationError(
-                "Username and password must be provided either as arguments or "
-                "via SU_USERNAME and SU_PASSWORD environment variables"
-            )
-
-        self.base_url = DSV_URLS["clickmap"]
-        self.auth = AsyncShibbolethAuth(
-            self.username, self.password, cache_backend=cache_backend, cache_ttl=cache_ttl
+        super().__init__(
+            username,
+            password,
+            "clickmap",
+            DSV_URLS["clickmap"],
+            cache_backend=cache_backend,
+            cache_ttl=cache_ttl,
         )
-        self._client: httpx.AsyncClient | None = None
-        self._authenticated = False
-
-        logger.debug(f"Initialized AsyncClickmapClient for user: {self.username}")
-
-    async def __aenter__(self):
-        """Async context manager entry."""
-        await self.auth.__aenter__()
-        self._client = httpx.AsyncClient(headers=DEFAULT_HEADERS, follow_redirects=True)
-        return self
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Async context manager exit."""
-        if self._client:
-            await self._client.aclose()
-        await self.auth.__aexit__(exc_type, exc_val, exc_tb)
-
-    async def _ensure_authenticated(self) -> None:
-        """Ensure the client is authenticated."""
-        if not self._authenticated:
-            logger.debug("Authenticating to clickmap...")
-            await self.auth.login(service="clickmap")
-            # Copy cookies from auth client to this client (preserve domain/path)
-            for cookie in self.auth._sync_auth._client.cookies.jar:
-                self._client.cookies.set(
-                    cookie.name, cookie.value, domain=cookie.domain, path=cookie.path
-                )
-            self._authenticated = True
-            logger.debug("Successfully authenticated to clickmap")
 
     async def get_placements(self) -> list[Placement]:
         """Get all workspace placements.

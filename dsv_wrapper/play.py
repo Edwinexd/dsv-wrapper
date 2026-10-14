@@ -7,10 +7,9 @@ from pathlib import Path
 
 import httpx
 
-from .auth import AsyncShibbolethAuth, ShibbolethAuth
 from .auth.cache_backend import CacheBackend
+from .base import BaseAsyncClient, BaseClient
 from .exceptions import (
-    AuthenticationError,
     NetworkError,
     ParseError,
     TranscriptNotReadyError,
@@ -27,7 +26,7 @@ from .parsers.play import (
     parse_vtt,
     resolve_track_download,
 )
-from .utils import DEFAULT_HEADERS, DSV_URLS
+from .utils import DSV_URLS
 
 # Streaming chunk size used for both downloads and range iteration. 1 MiB is
 # large enough to amortise per-chunk Python overhead and small enough that an
@@ -63,7 +62,7 @@ def _build_range_header(start_byte: int, end_byte: int | None) -> str | None:
 logger = logging.getLogger(__name__)
 
 
-class PlayClient:
+class PlayClient(BaseClient):
     """Synchronous client for DSVPlay (play.dsv.su.se).
 
     DSVPlay is the video/presentation platform for DSV, hosting recorded lectures
@@ -88,35 +87,14 @@ class PlayClient:
         Raises:
             AuthenticationError: If username/password not provided and not in env vars
         """
-        self.username = username or os.environ.get("SU_USERNAME")
-        self.password = password or os.environ.get("SU_PASSWORD")
-
-        if not self.username or not self.password:
-            raise AuthenticationError(
-                "Username and password must be provided either as arguments or "
-                "via SU_USERNAME and SU_PASSWORD environment variables"
-            )
-
-        self.base_url = DSV_URLS["play"]
-        self.auth = ShibbolethAuth(
-            self.username, self.password, cache_backend=cache_backend, cache_ttl=cache_ttl
+        super().__init__(
+            username,
+            password,
+            "play",
+            DSV_URLS["play"],
+            cache_backend=cache_backend,
+            cache_ttl=cache_ttl,
         )
-        self._client = httpx.Client(headers=DEFAULT_HEADERS, follow_redirects=True)
-        self._authenticated = False
-
-        logger.debug(f"Initialized PlayClient for user: {self.username}")
-
-    def _ensure_authenticated(self) -> None:
-        """Ensure the client is authenticated."""
-        if not self._authenticated:
-            logger.debug("Authenticating to play...")
-            self.auth._login("play")
-            for cookie in self.auth._client.cookies.jar:
-                self._client.cookies.set(
-                    cookie.name, cookie.value, domain=cookie.domain, path=cookie.path
-                )
-            self._authenticated = True
-            logger.debug("Successfully authenticated to play")
 
     def get_courses(self) -> list[PlayCourse]:
         """Get all courses the user has presentations in.
@@ -515,21 +493,8 @@ class PlayClient:
 
         return parse_playlist_json(response.json())
 
-    def close(self) -> None:
-        """Close the client session."""
-        self._client.close()
-        self.auth.__exit__(None, None, None)
 
-    def __enter__(self):
-        """Context manager entry."""
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        """Context manager exit."""
-        self.close()
-
-
-class AsyncPlayClient:
+class AsyncPlayClient(BaseAsyncClient):
     """Asynchronous client for DSVPlay (play.dsv.su.se).
 
     DSVPlay is the video/presentation platform for DSV, hosting recorded lectures
@@ -554,47 +519,14 @@ class AsyncPlayClient:
         Raises:
             AuthenticationError: If username/password not provided and not in env vars
         """
-        self.username = username or os.environ.get("SU_USERNAME")
-        self.password = password or os.environ.get("SU_PASSWORD")
-
-        if not self.username or not self.password:
-            raise AuthenticationError(
-                "Username and password must be provided either as arguments or "
-                "via SU_USERNAME and SU_PASSWORD environment variables"
-            )
-
-        self.base_url = DSV_URLS["play"]
-        self.auth = AsyncShibbolethAuth(
-            self.username, self.password, cache_backend=cache_backend, cache_ttl=cache_ttl
+        super().__init__(
+            username,
+            password,
+            "play",
+            DSV_URLS["play"],
+            cache_backend=cache_backend,
+            cache_ttl=cache_ttl,
         )
-        self._client: httpx.AsyncClient | None = None
-        self._authenticated = False
-
-        logger.debug(f"Initialized AsyncPlayClient for user: {self.username}")
-
-    async def __aenter__(self):
-        """Async context manager entry."""
-        await self.auth.__aenter__()
-        self._client = httpx.AsyncClient(headers=DEFAULT_HEADERS, follow_redirects=True)
-        return self
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Async context manager exit."""
-        if self._client:
-            await self._client.aclose()
-        await self.auth.__aexit__(exc_type, exc_val, exc_tb)
-
-    async def _ensure_authenticated(self) -> None:
-        """Ensure the client is authenticated."""
-        if not self._authenticated:
-            logger.debug("Authenticating to play...")
-            await self.auth.login(service="play")
-            for cookie in self.auth._sync_auth._client.cookies.jar:
-                self._client.cookies.set(
-                    cookie.name, cookie.value, domain=cookie.domain, path=cookie.path
-                )
-            self._authenticated = True
-            logger.debug("Successfully authenticated to play")
 
     async def get_courses(self) -> list[PlayCourse]:
         """Get all courses the user has presentations in.

@@ -2,17 +2,14 @@
 
 import asyncio
 import logging
-import os
 import re
-import time as time_module
 from datetime import date, time
 
 import httpx
 
-from .auth import AsyncShibbolethAuth, ShibbolethAuth
 from .auth.cache_backend import CacheBackend
+from .base import BaseAsyncClient, BaseClient
 from .exceptions import (
-    AuthenticationError,
     BookingError,
     NetworkError,
     ParseError,
@@ -32,7 +29,6 @@ from .models import (
 )
 from .parsers import daisy as daisy_parsers
 from .utils import (
-    DEFAULT_HEADERS,
     DSV_URLS,
     build_url,
     extract_text,
@@ -90,7 +86,7 @@ def _build_course_search_form(
     return form
 
 
-class DaisyClient:
+class DaisyClient(BaseClient):
     """Synchronous client for Daisy system."""
 
     def __init__(
@@ -115,34 +111,15 @@ class DaisyClient:
         Raises:
             AuthenticationError: If username/password not provided and not in env vars
         """
-        # Get credentials from env vars if not provided
-        self.username = username or os.environ.get("SU_USERNAME")
-        self.password = password or os.environ.get("SU_PASSWORD")
-
-        if not self.username or not self.password:
-            raise AuthenticationError(
-                "Username and password must be provided either as arguments or "
-                "via SU_USERNAME and SU_PASSWORD environment variables"
-            )
-        self.service = service
-        self.base_url = DSV_URLS[service]
-        self.max_concurrent = max_concurrent
-        self.auth = ShibbolethAuth(
-            self.username, self.password, cache_backend=cache_backend, cache_ttl=cache_ttl
+        super().__init__(
+            username,
+            password,
+            service,
+            DSV_URLS[service],
+            cache_backend=cache_backend,
+            cache_ttl=cache_ttl,
         )
-        self._client = httpx.Client(headers=DEFAULT_HEADERS, follow_redirects=True)
-        self._authenticated = False
-
-    def _ensure_authenticated(self) -> None:
-        """Ensure the client is authenticated."""
-        if not self._authenticated:
-            self.auth._login(self.service)
-            # Copy cookies from auth client to this client
-            for cookie in self.auth._client.cookies.jar:
-                self._client.cookies.set(
-                    cookie.name, cookie.value, domain=cookie.domain, path=cookie.path
-                )
-            self._authenticated = True
+        self.max_concurrent = max_concurrent
 
     def get_schedule(self, category: RoomCategory, schedule_date: date | None = None) -> Schedule:
         """Get room schedule for a category and date.
@@ -475,50 +452,34 @@ class DaisyClient:
         logger.info(f"Completed: {len(detailed_staff)} staff members with details")
         return detailed_staff
 
-    def download_profile_picture(self, url: str, max_retries: int = 3) -> bytes:
+    def download_profile_picture(self, url: str) -> bytes:
         """Download a profile picture from the given URL.
+
+        Transient failures are retried by the client's transport.
 
         Args:
             url: The URL of the profile picture
-            max_retries: Maximum number of retry attempts for transient errors
 
         Returns:
             Image bytes
 
         Raises:
-            NetworkError: If the download fails after all retries
+            NetworkError: If the download fails
             ValueError: If the response is not an image
         """
         self._ensure_authenticated()
 
-        last_error = None
-        for attempt in range(max_retries + 1):
-            try:
-                response = self._client.get(url, timeout=10)
-                response.raise_for_status()
+        try:
+            response = self._client.get(url, timeout=10)
+            response.raise_for_status()
+        except httpx.HTTPError as e:
+            raise NetworkError(f"Failed to download profile picture: {e}") from e
 
-                content_type = response.headers.get("Content-Type", "")
-                if "image" not in content_type:
-                    raise ValueError(f"URL did not return an image (Content-Type: {content_type})")
+        content_type = response.headers.get("Content-Type", "")
+        if "image" not in content_type:
+            raise ValueError(f"URL did not return an image (Content-Type: {content_type})")
 
-                return response.content
-
-            except httpx.HTTPStatusError as e:
-                # Don't retry client errors (4xx)
-                if 400 <= e.response.status_code < 500:
-                    raise NetworkError(f"Failed to download profile picture: {e}") from e
-                last_error = e
-            except httpx.HTTPError as e:
-                # Retry on network errors (connection, timeout, protocol errors)
-                last_error = e
-
-            if attempt < max_retries:
-                wait_time = 2**attempt  # Exponential backoff: 1, 2, 4 seconds
-                logger.debug(f"Retry {attempt + 1}/{max_retries} for {url} after {wait_time}s")
-                time_module.sleep(wait_time)
-
-        msg = f"Failed to download profile picture after {max_retries + 1} attempts: {last_error}"
-        raise NetworkError(msg) from last_error
+        return response.content
 
     def get_courses(
         self,
@@ -689,21 +650,8 @@ class DaisyClient:
         html = self._get_course_page("momentinfo.Momentinfo", momenttillf_id, language)
         return daisy_parsers.parse_course_participants(html, self.base_url)
 
-    def close(self) -> None:
-        """Close the client session."""
-        self._client.close()
-        self.auth.__exit__(None, None, None)
 
-    def __enter__(self):
-        """Context manager entry."""
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        """Context manager exit."""
-        self.close()
-
-
-class AsyncDaisyClient:
+class AsyncDaisyClient(BaseAsyncClient):
     """Asynchronous client for Daisy system."""
 
     def __init__(
@@ -728,51 +676,16 @@ class AsyncDaisyClient:
         Raises:
             AuthenticationError: If username/password not provided and not in env vars
         """
-        # Get credentials from env vars if not provided
-        self.username = username or os.environ.get("SU_USERNAME")
-        self.password = password or os.environ.get("SU_PASSWORD")
-
-        if not self.username or not self.password:
-            raise AuthenticationError(
-                "Username and password must be provided either as arguments or "
-                "via SU_USERNAME and SU_PASSWORD environment variables"
-            )
-
-        self.service = service
-        self.base_url = DSV_URLS[service]
-        self.max_concurrent = max_concurrent
-        self.auth = AsyncShibbolethAuth(
-            self.username, self.password, cache_backend=cache_backend, cache_ttl=cache_ttl
+        super().__init__(
+            username,
+            password,
+            service,
+            DSV_URLS[service],
+            cache_backend=cache_backend,
+            cache_ttl=cache_ttl,
+            follow_redirects=False,
         )
-        self._client: httpx.AsyncClient | None = None
-        self._authenticated = False
-
-        logger.debug(f"Initialized AsyncDaisyClient for user: {self.username}")
-
-    async def __aenter__(self):
-        """Async context manager entry."""
-        await self.auth.__aenter__()
-        self._client = httpx.AsyncClient(headers=DEFAULT_HEADERS)
-        return self
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Async context manager exit."""
-        if self._client:
-            await self._client.aclose()
-        await self.auth.__aexit__(exc_type, exc_val, exc_tb)
-
-    async def _ensure_authenticated(self) -> None:
-        """Ensure the client is authenticated."""
-        if not self._authenticated:
-            logger.info(f"Authenticating to {self.service}")
-            await self.auth.login(service=self.service)
-            # Copy cookies from auth client to this client (preserve domain/path)
-            for cookie in self.auth._sync_auth._client.cookies.jar:
-                self._client.cookies.set(
-                    cookie.name, cookie.value, domain=cookie.domain, path=cookie.path
-                )
-            self._authenticated = True
-            logger.info(f"Successfully authenticated to {self.service}")
+        self.max_concurrent = max_concurrent
 
     async def get_schedule(
         self, category: RoomCategory, schedule_date: date | None = None
@@ -1025,7 +938,6 @@ class AsyncDaisyClient:
         Returns:
             List of Staff objects with complete details
         """
-        import asyncio
 
         # First, get list of all staff
         logger.info(f"Fetching all staff for institution {institution_id}")
@@ -1193,47 +1105,31 @@ class AsyncDaisyClient:
         html = await self._get_course_page("momentinfo.Momentinfo", momenttillf_id, language)
         return daisy_parsers.parse_course_participants(html, self.base_url)
 
-    async def download_profile_picture(self, url: str, max_retries: int = 3) -> bytes:
+    async def download_profile_picture(self, url: str) -> bytes:
         """Download a profile picture from the given URL.
+
+        Transient failures are retried by the client's transport.
 
         Args:
             url: The URL of the profile picture
-            max_retries: Maximum number of retry attempts for transient errors
 
         Returns:
             Image bytes
 
         Raises:
-            NetworkError: If the download fails after all retries
+            NetworkError: If the download fails
             ValueError: If the response is not an image
         """
         await self._ensure_authenticated()
 
-        last_error = None
-        for attempt in range(max_retries + 1):
-            try:
-                response = await self._client.get(url, timeout=10)
-                response.raise_for_status()
+        try:
+            response = await self._client.get(url, timeout=10)
+            response.raise_for_status()
+        except httpx.HTTPError as e:
+            raise NetworkError(f"Failed to download profile picture: {e}") from e
 
-                content_type = response.headers.get("Content-Type", "")
-                if "image" not in content_type:
-                    raise ValueError(f"URL did not return an image (Content-Type: {content_type})")
+        content_type = response.headers.get("Content-Type", "")
+        if "image" not in content_type:
+            raise ValueError(f"URL did not return an image (Content-Type: {content_type})")
 
-                return response.content
-
-            except httpx.HTTPStatusError as e:
-                # Don't retry client errors (4xx)
-                if 400 <= e.response.status_code < 500:
-                    raise NetworkError(f"Failed to download profile picture: {e}") from e
-                last_error = e
-            except httpx.HTTPError as e:
-                # Retry on network errors (connection, timeout, protocol errors)
-                last_error = e
-
-            if attempt < max_retries:
-                wait_time = 2**attempt  # Exponential backoff: 1, 2, 4 seconds
-                logger.debug(f"Retry {attempt + 1}/{max_retries} for {url} after {wait_time}s")
-                await asyncio.sleep(wait_time)
-
-        msg = f"Failed to download profile picture after {max_retries + 1} attempts: {last_error}"
-        raise NetworkError(msg) from last_error
+        return response.content
