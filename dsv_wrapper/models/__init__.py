@@ -55,8 +55,6 @@ from .mail import (
     MailFolder,
     SendEmailResult,
 )
-
-# Play models
 from .play import (
     PlayCourse,
     Presentation,
@@ -65,6 +63,14 @@ from .play import (
     TrackInfo,
     TranscriptCue,
     VideoSource,
+)
+
+# Play models
+from .syllabus import (
+    LiteratureList,
+    SyllabusArchiveEntry,
+    SyllabusLink,
+    SyllabusVersion,
 )
 
 __all__ = [
@@ -91,6 +97,11 @@ __all__ = [
     "CourseStaff",
     "CourseExam",
     "SyllabusCourse",
+    # Syllabus archive models
+    "SyllabusArchiveEntry",
+    "SyllabusVersion",
+    "SyllabusLink",
+    "LiteratureList",
     "CourseResponsibility",
     # Handledning models
     "QueueStatus",

@@ -1,0 +1,1 @@
+500 Internal Server Error: HttpStatusCodeException when executing request: 404 404: "{"errorMessage":"Utbildningsinstans (latest version not draft) with utbildningskod PROG2 not found.","requestedURI":"/api/utbildningsinformation/utbildningsinstans/latest/PROG2"}"

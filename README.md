@@ -138,6 +138,27 @@ feed, including stable event `UID` values, `LAST-MODIFIED`, and the `Europe/Stoc
 Use `UID` as the external key in Minerva, update events from each fresh snapshot, and remove
 previously imported UIDs that disappear from the snapshot.
 
+#### Syllabus Archive Client
+
+The `syllabus_url` on a Daisy course is an HTML page in SU's syllabus archive (planarkiv), not a
+PDF. `SyllabusClient` reads the archive's JSON instead and lists every published syllabus version
+with its PDF URL. It is public, so no credentials are needed. Look courses up by their Ladok code
+(`SyllabusCourse.code`, e.g. `IB440C`), not the Daisy designation (`PROG2`).
+
+```python
+from dsv_wrapper import SyllabusClient, SyllabusNotFoundError
+
+with SyllabusClient() as archive:
+    entry = archive.get_syllabus_archive("IB440C")          # language="en" for English PDFs
+    print(entry.name, entry.ects, entry.is_discontinued)
+    for version in entry.versions:                          # newest first
+        print(version.semester.label, version.language, version.pdf_url)
+    print("latest:", entry.latest.pdf_url)
+```
+
+With `language="en"`, versions that have no English PDF are listed with their Swedish one
+(`version.language == "sv"`). Unknown codes raise `SyllabusNotFoundError`.
+
 #### Handledning Client
 
 ```python

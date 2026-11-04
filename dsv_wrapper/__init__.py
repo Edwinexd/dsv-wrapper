@@ -27,6 +27,7 @@ from .exceptions import (
     QueueError,
     RoomNotAvailableError,
     SessionExpiredError,
+    SyllabusNotFoundError,
     TranscriptNotReadyError,
     ValidationError,
 )
@@ -67,7 +68,9 @@ from .models import (
     SlideUploadResult,
     Staff,
     Student,
+    SyllabusArchiveEntry,
     SyllabusCourse,
+    SyllabusVersion,
     Teacher,
     TermSeason,
     TrackDownload,
@@ -76,6 +79,7 @@ from .models import (
     VideoSource,
 )
 from .play import AsyncPlayClient, PlayClient
+from .syllabus import AsyncSyllabusClient, SyllabusClient
 
 # Utilities
 from .utils import (
@@ -110,6 +114,8 @@ __all__ = [
     "AsyncClickmapClient",
     "PlayClient",
     "AsyncPlayClient",
+    "SyllabusClient",
+    "AsyncSyllabusClient",
     "MailClient",
     "AsyncMailClient",
     # Authentication
@@ -137,6 +143,8 @@ __all__ = [
     "CourseStaff",
     "CourseExam",
     "SyllabusCourse",
+    "SyllabusArchiveEntry",
+    "SyllabusVersion",
     "Semester",
     "TermSeason",
     "CourseResponsibility",
@@ -171,6 +179,7 @@ __all__ = [
     "InvalidTimeSlotError",
     "ParseError",
     "PresentationNotReadyError",
+    "SyllabusNotFoundError",
     "TranscriptNotReadyError",
     "NetworkError",
     "HandledningError",

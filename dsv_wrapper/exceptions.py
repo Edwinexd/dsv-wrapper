@@ -112,3 +112,13 @@ class AmbiguousMatchError(DSVWrapperError):
     """
 
     pass
+
+
+class SyllabusNotFoundError(DSVWrapperError):
+    """Raised when the syllabus archive has no course or programme with a code.
+
+    Daisy course designations (e.g. ``PROG2``) are not archive codes; use the
+    Ladok code from :attr:`dsv_wrapper.models.daisy.SyllabusCourse.code`.
+    """
+
+    pass
