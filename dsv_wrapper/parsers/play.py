@@ -83,12 +83,40 @@ def resolve_track_download(presentation: Presentation, track_index: int) -> Trac
     )
 
 
-def _parse_courses_from_component(html: str, component_name: str) -> list[PlayCourse]:
-    """Parse the `courses` filter of a named Livewire component.
+def _find_component(soup, component_name: str):
+    """Return ``(element, snapshot)`` for the named Livewire component.
 
-    Many pages (user/all, tag/{tag}, study/all, ...) embed a Livewire component
-    whose `data.courses` field is a dict of `{code: full_name}` for every
-    course visible under that page's scope.
+    Raises:
+        ParseError: If the page has no such component
+    """
+    for elem in soup.find_all(attrs={"wire:snapshot": True}):
+        try:
+            snap = json.loads(elem.get("wire:snapshot", "{}"))
+        except json.JSONDecodeError:
+            continue
+        if snap.get("memo", {}).get("name", "") == component_name:
+            return elem, snap
+    raise ParseError(f"Livewire component {component_name!r} not found on page")
+
+
+def _is_library_layout(elem) -> bool:
+    """Whether a component renders the library layout (Play, Nov 2026).
+
+    That layout renders its course filter and per-term sections into the HTML
+    instead of carrying them in the snapshot. The course filter is always
+    present, so a page with it and no sections is genuinely empty.
+    """
+    return elem.find(attrs={"wire:key": "library-filter-courses"}) is not None
+
+
+def _parse_courses_from_component(html: str, component_name: str) -> list[PlayCourse]:
+    """Parse the courses listed by a named Livewire component.
+
+    Many pages (user/all, tag/{tag}, designation/{code}, ...) embed a Livewire
+    component listing every course visible under that page's scope. The
+    library layout renders them as checkboxes of its course filter
+    (``value`` = code, label ``"CODE · Name"``); older pages carried them as
+    ``data.courses`` (``{code: full_name}``) in the snapshot.
 
     Args:
         html: HTML content of the page
@@ -99,40 +127,33 @@ def _parse_courses_from_component(html: str, component_name: str) -> list[PlayCo
         List of PlayCourse objects
 
     Raises:
-        ParseError: If the component or its courses field is not found
+        ParseError: If the component or its course list is not found
     """
-    soup = parse_html(html)
+    elem, snap = _find_component(parse_html(html), component_name)
 
-    for elem in soup.find_all(attrs={"wire:snapshot": True}):
-        try:
-            snap = json.loads(elem.get("wire:snapshot", "{}"))
-        except json.JSONDecodeError:
-            continue
+    raw: dict[str, str] | None = None
+    courses_data = snap.get("data", {}).get("courses")
+    if isinstance(courses_data, list) and courses_data and isinstance(courses_data[0], dict):
+        raw = courses_data[0]
+    elif _is_library_layout(elem):
+        raw = {}
+        for box in elem.find_all("input", attrs={"wire:model.live": "selectedCourses"}):
+            code = box.get("value", "")
+            label = box.find_parent("label")
+            text = label.get_text(" ", strip=True) if label else ""
+            prefix = f"{code} · "
+            raw[code] = text[len(prefix) :] if text.startswith(prefix) else text
 
-        name = snap.get("memo", {}).get("name", "")
-        if name != component_name:
-            continue
+    if raw is None:
+        raise ParseError(f"Could not find course data in Livewire component {component_name!r}")
 
-        data = snap.get("data", {})
-        courses_raw = data.get("courses", [[]])[0]
-
-        if not isinstance(courses_raw, dict):
-            continue
-
-        courses = []
-        for code, full_name in courses_raw.items():
-            if code == "nocourse":
-                continue
-            courses.append(PlayCourse(code=code, name=full_name))
-
-        logger.info(f"Parsed {len(courses)} courses from Livewire component {component_name!r}")
-        return courses
-
-    raise ParseError(f"Could not find course data in Livewire component {component_name!r}")
+    courses = [PlayCourse(code=code, name=name) for code, name in raw.items() if code != "nocourse"]
+    logger.info(f"Parsed {len(courses)} courses from Livewire component {component_name!r}")
+    return courses
 
 
 def parse_courses_from_html(html: str) -> list[PlayCourse]:
-    """Parse courses from the /user/all page Livewire snapshot.
+    """Parse courses from the /user/all page.
 
     Args:
         html: HTML content of the /user/all page
@@ -147,11 +168,11 @@ def parse_courses_from_html(html: str) -> list[PlayCourse]:
 
 
 def parse_courses_from_tag_html(html: str) -> list[PlayCourse]:
-    """Parse courses from a /tag/{tag} page Livewire snapshot.
+    """Parse courses from a /tag/{tag} page.
 
-    The tag-results component's ``courses`` field enumerates every course that
-    has at least one presentation matching the tag. Unioning across broad tags
-    such as ``Lecture`` and ``Föreläsning`` yields a near-complete catalog of
+    The tag-results component lists every course that has at least one
+    presentation matching the tag. Unioning across broad tags such as
+    ``Lecture`` and ``Föreläsning`` yields a near-complete catalog of
     designations hosted on play.dsv.su.se.
 
     Args:
@@ -167,83 +188,75 @@ def parse_courses_from_tag_html(html: str) -> list[PlayCourse]:
 
 
 def parse_playlist_ids_from_html(html: str) -> list[int]:
-    """Parse all playlist IDs from a /designation/{code} page Livewire snapshot.
+    """Parse all playlist IDs from a /designation/{code} page.
 
-    A designation that has been offered across multiple terms exposes one
-    playlist per term in the ``videos`` map. The keys of that map are the
-    playlist IDs, ordered most-recent-first by the page. This function returns
-    them all so callers can aggregate presentations across every term, not just
-    the latest one.
+    A designation that has been offered across multiple terms has one
+    playlist per term, ordered most-recent-first by the page. The library
+    layout renders each as a ``library-course-{id}`` section; older pages
+    carried them as the keys of the snapshot's ``videos`` map.
 
     Args:
         html: HTML content of a designation page
 
     Returns:
-        List of playlist IDs (empty if none found)
+        List of playlist IDs (empty if the designation has none)
+
+    Raises:
+        ParseError: If the page has neither layout
     """
-    soup = parse_html(html)
+    elem, snap = _find_component(parse_html(html), "search.course-results")
 
-    for elem in soup.find_all(attrs={"wire:snapshot": True}):
+    videos = snap.get("data", {}).get("videos")
+    if isinstance(videos, list) and videos and isinstance(videos[0], dict):
+        keys = list(videos[0])
+    elif _is_library_layout(elem):
+        keys = [
+            section["wire:key"].removeprefix("library-course-")
+            for section in elem.find_all(
+                "section", attrs={"wire:key": re.compile(r"^library-course-\d+$")}
+            )
+        ]
+    else:
+        raise ParseError("Could not find playlists on designation page")
+
+    playlist_ids = []
+    for raw_id in keys:
         try:
-            snap = json.loads(elem.get("wire:snapshot", "{}"))
-        except json.JSONDecodeError:
+            playlist_ids.append(int(raw_id))
+        except (ValueError, TypeError):
             continue
-
-        name = snap.get("memo", {}).get("name", "")
-        if name != "search.course-results":
-            continue
-
-        data = snap.get("data", {})
-        videos = data.get("videos", [{}])
-
-        if not isinstance(videos[0], dict):
-            continue
-
-        playlist_ids = []
-        for raw_id in videos[0]:
-            try:
-                playlist_ids.append(int(raw_id))
-            except (ValueError, TypeError):
-                continue
-        return playlist_ids
-
-    return []
+    return playlist_ids
 
 
 def parse_presentation_ids_from_html(html: str) -> list[str]:
-    """Parse presentation UUIDs from /designation/{code} page Livewire snapshot.
+    """Parse presentation UUIDs from an older /designation/{code} snapshot.
+
+    Only older pages listed presentations outside playlists (``allVideos``);
+    the library layout has none, so it yields an empty list.
 
     Args:
         html: HTML content of a designation page
 
     Returns:
         List of presentation UUIDs
+
+    Raises:
+        ParseError: If the page has neither layout
     """
-    soup = parse_html(html)
+    elem, snap = _find_component(parse_html(html), "search.course-results")
 
-    for elem in soup.find_all(attrs={"wire:snapshot": True}):
-        try:
-            snap = json.loads(elem.get("wire:snapshot", "{}"))
-        except json.JSONDecodeError:
-            continue
-
-        name = snap.get("memo", {}).get("name", "")
-        if name != "search.course-results":
-            continue
-
-        data = snap.get("data", {})
-        all_videos = data.get("allVideos", [None, {}])
-
-        if len(all_videos) > 1 and isinstance(all_videos[1], dict):
-            # Populated designation: keys is a dict of {position: uuid}.
-            # Empty/unknown designation: Livewire serializes the empty
-            # collection's keys as a list ([]), which has no .values().
-            keys = all_videos[1].get("keys")
-            if isinstance(keys, dict):
-                return list(keys.values())
-            return []
-
-    return []
+    all_videos = snap.get("data", {}).get("allVideos")
+    if isinstance(all_videos, list) and len(all_videos) > 1 and isinstance(all_videos[1], dict):
+        # Populated designation: keys is a dict of {position: uuid}.
+        # Empty/unknown designation: Livewire serializes the empty
+        # collection's keys as a list ([]), which has no .values().
+        keys = all_videos[1].get("keys")
+        if isinstance(keys, dict):
+            return list(keys.values())
+        return []
+    if _is_library_layout(elem):
+        return []
+    raise ParseError("Could not find presentations on designation page")
 
 
 def parse_presentation_json(data: object) -> Presentation:

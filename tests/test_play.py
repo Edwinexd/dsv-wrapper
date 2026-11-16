@@ -21,6 +21,7 @@ from dsv_wrapper.models.play import (
 )
 from dsv_wrapper.parsers.play import (
     enumerate_track_descriptors,
+    parse_courses_from_tag_html,
     parse_playlist_ids_from_html,
     parse_presentation_ids_from_html,
     parse_presentation_json,
@@ -452,9 +453,65 @@ def test_parse_playlist_ids_returns_all_terms():
     assert parse_playlist_ids_from_html(html) == [7620, 7464, 7292]
 
 
-def test_parse_playlist_ids_no_videos():
-    """Pages without a course-results component yield an empty list."""
-    assert parse_playlist_ids_from_html("<html></html>") == []
+def test_parse_playlist_ids_missing_component():
+    """A page without the course-results component is a markup change, not an empty result."""
+    with pytest.raises(ParseError):
+        parse_playlist_ids_from_html("<html></html>")
+    with pytest.raises(ParseError):
+        parse_presentation_ids_from_html("<html></html>")
+
+
+def _library_page(component: str, body: str) -> str:
+    """A page in Play's library layout (Nov 2026): data rendered, not in the snapshot."""
+    import json
+
+    data = {"paginators": [{"presentationsPage": 1}, {"s": "arr"}]}
+    snapshot = json.dumps({"memo": {"name": component}, "data": data}).replace('"', "&quot;")
+    return f"""<div wire:snapshot="{snapshot}">
+      <div wire:key="library-filter-courses">
+        <label class="library-option"><input type="checkbox" value="nocourse"
+          wire:model.live="selectedCourses"/><span>No course association</span></label>
+        <label class="library-option"><input type="checkbox" value="IDSV"
+          wire:model.live="selectedCourses"/>
+          <span>IDSV · Introduction to Computer and Systems Sciences</span></label>
+        <label class="library-option"><input type="checkbox" value="PVT 7.5"
+          wire:model.live="selectedCourses"/><span>PVT 7.5 · Programvaruteknik</span></label>
+      </div>
+      {body}
+    </div>"""
+
+
+def test_parse_courses_library_layout():
+    html = _library_page("search.tag-results", "")
+    assert parse_courses_from_tag_html(html) == [
+        PlayCourse(code="IDSV", name="Introduction to Computer and Systems Sciences"),
+        PlayCourse(code="PVT 7.5", name="Programvaruteknik"),
+    ]
+
+
+def test_parse_courses_library_layout_missing_filter():
+    """The component without its course filter is a markup change."""
+    html = _library_page("search.tag-results", "").replace(
+        'wire:key="library-filter-courses"', 'wire:key="library-filter-presenters"'
+    )
+    with pytest.raises(ParseError):
+        parse_courses_from_tag_html(html)
+
+
+def test_parse_playlist_ids_library_layout():
+    sections = "".join(
+        f'<section class="library-course" wire:key="library-course-{i}"><h3>IDSV</h3></section>'
+        for i in (7689, 7562, 7382)
+    )
+    html = _library_page("search.course-results", sections)
+    assert parse_playlist_ids_from_html(html) == [7689, 7562, 7382]
+    assert parse_presentation_ids_from_html(html) == []
+
+
+def test_parse_playlist_ids_library_layout_empty():
+    """A designation with no terms renders the filter and no sections."""
+    html = _library_page("search.course-results", "")
+    assert parse_playlist_ids_from_html(html) == []
 
 
 def test_parse_presentation_ids_empty_designation():
